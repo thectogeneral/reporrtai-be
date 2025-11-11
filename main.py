@@ -808,8 +808,11 @@ def choose_llm(use_json_mode: bool = True):
             llm_kwargs = {
                 "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
                 "temperature": temperature,
-                "num_predict": max_tokens
+                "num_predict": max_tokens,
+                "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             }
+
+            
             
             # Add format="json" if use_json_mode is True
             if use_json_mode:
@@ -1128,15 +1131,15 @@ def extract_pain_points_fallback(thread_text: str) -> List[Dict[str, Any]]:
                         })
                     
                     # Limit to avoid too many pain points
-                    if len(pain_points) >= 7:
+                    if len(pain_points) >= 10:
                         break
         
-        if len(pain_points) >= 7:
+        if len(pain_points) >= 10:
             break
     
     # Return pain points even if less than 3 (better than nothing)
     if pain_points:
-        return pain_points[:7]  # Return up to 7
+        return pain_points[:7]  # Return up to 10
     
     return []
 
