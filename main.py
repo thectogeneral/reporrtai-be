@@ -1134,8 +1134,8 @@ def extract_pain_points_fallback(thread_text: str) -> List[Dict[str, Any]]:
         if len(pain_points) >= 7:
             break
     
-    # If we found at least 3 pain points, return them
-    if len(pain_points) >= 3:
+    # Return pain points even if less than 3 (better than nothing)
+    if pain_points:
         return pain_points[:7]  # Return up to 7
     
     return []
