@@ -809,7 +809,6 @@ def choose_llm(use_json_mode: bool = True):
                 "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
                 "temperature": temperature,
                 "num_predict": max_tokens,
-                "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             }
 
             
@@ -1414,12 +1413,10 @@ def generate_comprehensive_report(url: str) -> Dict[str, Any]:
                 print(f"DEBUG: Fallback extraction found {len(fallback_pain_points)} pain points")
                 pain_points_list = fallback_pain_points
             else:
-                print("DEBUG: Fallback extraction also failed, creating generic fallback")
-            pain_points_list = [{
-                    "description": "Unable to extract pain points from the discussion",
-                "sentiment": "neutral",
-                "quote": ""
-            }]
+                print("ERROR: Fallback extraction also failed - unable to extract pain points")
+                print(f"ERROR: Thread text length: {len(thread_text) if thread_text else 0}")
+                print(f"ERROR: Thread text preview: {thread_text[:500] if thread_text else 'None'}")
+                # Don't create fallback message here - let it be handled later with proper error reporting
 
         # Filter out empty pain points
         filtered_pain_points = []
@@ -1472,14 +1469,12 @@ def generate_comprehensive_report(url: str) -> Dict[str, Any]:
         pain_points_list = filtered_pain_points
         print(f"DEBUG: After filtering, have {len(pain_points_list)} pain points")
         
-        # If no pain points extracted or all were empty, create fallback
+        # If no pain points extracted or all were empty, log error but don't create fallback
         if not pain_points_list:
-            print("DEBUG: No valid pain points extracted (all were empty), creating fallback")
-            pain_points_list = [{
-                "description": "Unable to extract pain points from the discussion",
-                "sentiment": "neutral",
-                "quote": ""
-            }]
+            print("ERROR: No valid pain points extracted (all were empty)")
+            print("ERROR: This indicates a failure in the extraction pipeline")
+            print("ERROR: Check LLM response, JSON parsing, and fallback extraction logic")
+            # Don't create fallback message here - let final validation handle it with proper error reporting
         
         # Final validation: ensure pain_points_list is a list of dictionaries
         final_pain_points = []
@@ -1502,9 +1497,10 @@ def generate_comprehensive_report(url: str) -> Dict[str, Any]:
                 if not description or len(description) < 10:
                     print(f"DEBUG: Skipping item {idx} with empty/short description")
                     continue
-                # Skip the fallback message if we have other items
-                if description == "Unable to extract pain points from the discussion" and len(pain_points_list) > 1:
-                    print(f"DEBUG: Skipping fallback message at index {idx}")
+                # ALWAYS skip the fallback error message - it should never be returned as a valid pain point
+                if description == "Unable to extract pain points from the discussion":
+                    print(f"ERROR: Found fallback error message at index {idx} - skipping it. This indicates extraction failure.")
+                    print(f"ERROR: This should not be returned as a pain point. Check extraction logic.")
                     continue
                 # Ensure we have the correct structure
                 quote = item.get("quote", "").strip()
@@ -1539,18 +1535,36 @@ def generate_comprehensive_report(url: str) -> Dict[str, Any]:
                         if desc and len(desc) > 10:
                             final_pain_points.append(sub_item)
         
-        # If we still don't have valid pain points, create a fallback
+        # If we still don't have valid pain points, return error information instead of fallback message
         if not final_pain_points:
-            print("DEBUG: No valid pain points found after validation, creating fallback")
-            final_pain_points = [{
-                "description": "Unable to extract pain points from the discussion",
-                "sentiment": "neutral",
-                "quote": ""
-            }]
+            print("ERROR: No valid pain points found after all extraction attempts and validation")
+            print("ERROR: Extraction failure details:")
+            print(f"ERROR: - Thread text available: {bool(thread_text)}")
+            print(f"ERROR: - Thread text length: {len(thread_text) if thread_text else 0}")
+            print(f"ERROR: - URL: {url}")
+            print("ERROR: This indicates a critical failure in the pain point extraction pipeline.")
+            print("ERROR: Possible causes:")
+            print("ERROR: 1. LLM failed to return valid JSON")
+            print("ERROR: 2. JSON parsing failed")
+            print("ERROR: 3. Fallback keyword extraction found no matches")
+            print("ERROR: 4. All extracted pain points were filtered out as invalid")
+            # Return empty list with error flag instead of fake pain point
+            return {
+                "pain_points": [],
+                "pain_points_count": 0,
+                "url": url,
+                "error": "Failed to extract pain points from discussion",
+                "error_details": {
+                    "thread_text_available": bool(thread_text),
+                    "thread_text_length": len(thread_text) if thread_text else 0,
+                    "extraction_failed": True
+                }
+            }
         
         print(f"DEBUG: Returning {len(final_pain_points)} pain points")
         return {
             "pain_points": final_pain_points,
+            "pain_points_count": len(final_pain_points),
             "url": url
         }
         
