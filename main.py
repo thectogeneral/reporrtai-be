@@ -78,32 +78,39 @@ def make_painpoint_chain(llm):
     """Create a chain for pain points extraction with formatted output"""
     # Enhanced prompt with clear instructions for formatted text output
     prompt = PromptTemplate(
-        template="""You are an expert product analyst. Analyze the conversation/thread text below and extract the main pain points that users are discussing.
+        template="""You are an expert product analyst. Analyze the conversation/thread text below and extract the main **user pain points** being discussed.
 
-        CRITICAL REQUIREMENTS:
-        1. Extract REAL, MEANINGFUL pain points from the actual text. Do NOT return empty descriptions.
-        2. For EACH pain point, you MUST include an actual quote from the text (1-2 sentences).
-        3. The quote must be copied directly from the thread text, not paraphrased.
-        4. Include the username/author when available (e.g., "Comment by Username: ...")
-        5. **MANDATORY: You MUST return AT LEAST 3 pain points, preferably 5-10. Do NOT return only 1 or 2 pain points.**
+            CRITICAL REQUIREMENTS:
+            1. Extract **real, meaningful** pain points from the actual text. Do NOT produce vague or empty descriptions.
+            2. For EACH pain point, you MUST include:
+                - A short title summarizing the pain point.
+                - The **number of unique users** who mentioned or implied this pain point.
+                - At least one **direct quote** (1–2 sentences) from the text, copied EXACTLY.
+            3. Quotes must be copied **exactly** from the thread text — no paraphrasing.
+            4. When a username/author is available, include attribution (e.g., *"— Username"*).
+            5. If multiple users expressed the same pain point, include multiple quotes and count them.
+            6. If a pain point is inferred but not explicitly stated, label the quote section as: *(Implicit, not explicitly quoted)*.
+            7. **MANDATORY:** Return **at least 3 pain points** — ideally 5–10. Never return fewer than 3.
+            8. Final output must be formatted as bullet points:
+                - Start with a bullet (•)
+                - Pain point title in **bold**
+                - Followed by: *(X users complained)*   
+                - Then list the quotes under an indented block.
 
-        Format your response as readable text with bullet points. For each pain point:
-        - Start with a bullet point (•)
-        - Use **bold** for the pain point description
-        - Include the quote in quotes with attribution if available
-        - If a pain point is implicit but not explicitly quoted, note it as "(Implicit, but not explicitly quoted)"
+            ===== EXAMPLE (DO NOT INCLUDE IN OUTPUT) =====
+            • **High withdrawal fees** *(2 users complained)*: 
+                "Coinbase charges $906 for the fee..." — Beardog907
+                "Coinbase overcharges for withdrawals." — Blacknoyzz
 
-        Example format:
-        Here are the main pain points mentioned by users, along with example quotes:
+            • **Uncertainty about fees** *(2 users complained)*:
+                "What is the justification for cb charging this much?" — 7venhigh
+                "Coinbase charges exorbitant fees..." — Whitenoyzz
+            ===== END OF EXAMPLE =====
+            Thread text:
+            {thread_text}
+            
 
-        • **High withdrawal fees**: "Coinbase charges $906 for the fee. What is the best strategy to avoid super high fee." - Beardog907
-        • **Complexity of Coinbase's interface**: "I don't want to use coinbase one because I don't know how it works" (Implicit, but not explicitly quoted)
-        • **Uncertainty about fees**: "What is the justification for cb charging this much?" - 7venhigh
-
-        Thread text:
-        {thread_text}
-
-        Now extract the pain points from the above text. Format them as readable bullet points with quotes and attributions:""",
+            Now extract the pain points from the above text, following the rules above.""",
             input_variables=["thread_text"]
         )
     
@@ -112,214 +119,208 @@ def make_painpoint_chain(llm):
     return chain
 
 # Prompt for idea generation (multiple ideas with structured data)
-idea_template = """
-You are an innovative product strategist and system designer. 
-Given these pain points:
-{pain_points}
+idea_template = """You are an innovative product strategist and system designer. 
+        Given these pain points:
+        {pain_points}
 
-Propose **3-5** app ideas or digital solutions that address these issues. For each idea, provide:
+        Propose **3-5** app ideas or digital solutions that address these issues. For each idea, provide:
 
-1. **Tagline**: A catchy one-line tagline (max 15 words)
-2. **Problem**: What specific problem(s) does this solution solve? (2-3 sentences)
-3. **Product Description**: A clear description of what the product is and how it works (3-5 sentences)
-4. **Full Detail Report**: A comprehensive product roadmap covering:
-   - Product Overview (name, description, value proposition)
-   - Industry and target audience
-   - Core features (3-7 features)
-   - MVP scope
-   - Business model
-   - Go-to-market strategy
-   - Technical implementation overview
+        1. **Tagline**: A catchy one-line tagline (max 15 words)
+        2. **Problem**: What specific problem(s) does this solution solve? (2-3 sentences)
+        3. **Product Description**: A clear description of what the product is and how it works (3-5 sentences)
+        4. **Full Detail Report**: A comprehensive product roadmap covering:
+        - Product Overview (name, description, value proposition)
+        - Industry and target audience
+        - Core features (3-7 features)
+        - MVP scope
+        - Business model
+        - Go-to-market strategy
+        - Technical implementation overview
 
-Format your response as readable text with clear sections and formatting. Use markdown formatting for headers, bullet points, and emphasis.
-"""
+        Format your response as readable text with clear sections and formatting. Use markdown formatting for headers, bullet points, and emphasis."""
 
 # Prompt for single idea generation (for backward compatibility)
-idea_template_single = """
-You are an innovative product strategist and system designer. 
-Given these pain points:
-{pain_points}
+idea_template_single = """You are an innovative product strategist and system designer. 
+        Given these pain points:
+        {pain_points}
 
-Propose **one** app idea or digital solution (name it) that directly addresses these issues. 
-Then provide a **comprehensive and actionable product roadmap** covering the following:
+        Propose **one** app idea or digital solution (name it) that directly addresses these issues. 
+        Then provide a **comprehensive and actionable product roadmap** covering the following:
 
-1. **Product Overview**
-   - App Name
-   - One-sentence description
-   - Problem Summary
-   - **Value Proposition Summary:** State clearly how the solution stands out from competitors and what makes it unique or indispensable.
-   - Vision and long-term goal
+        1. **Product Overview**
+        - App Name
+        - One-sentence description
+        - Problem Summary
+        - **Value Proposition Summary:** State clearly how the solution stands out from competitors and what makes it unique or indispensable.
+        - Vision and long-term goal
 
-2. **Industry**
-   - What industry is the app in?
-   - What is the problem that the app solves?
-   - What is the target audience?
-   - What is the business stage?
+        2. **Industry**
+        - What industry is the app in?
+        - What is the problem that the app solves?
+        - What is the target audience?
+        - What is the business stage?
 
-3. **Target Users**
-   - Who are the primary and secondary users?
-   - What motivates them?
-   - Key demographics and behavioral traits
+        3. **Target Users**
+        - Who are the primary and secondary users?
+        - What motivates them?
+        - Key demographics and behavioral traits
 
-4. **Competitive Landscape**
-   - Compare the proposed solution to 2–3 existing competitors using a short table or summary.
-   - Highlight unique differentiators and market gaps.
+        4. **Competitive Landscape**
+        - Compare the proposed solution to 2–3 existing competitors using a short table or summary.
+        - Highlight unique differentiators and market gaps.
 
-5. **Core Features (3–7)**
-   - List and explain each feature.
-   - Indicate which features belong in the MVP vs. later versions.
+        5. **Core Features (3–7)**
+        - List and explain each feature.
+        - Indicate which features belong in the MVP vs. later versions.
 
-6. **How It Solves the Pain Points**
-   - Clearly map each feature to one or more pain points.
-   - Show how these connections create tangible user value.
+        6. **How It Solves the Pain Points**
+        - Clearly map each feature to one or more pain points.
+        - Show how these connections create tangible user value.
 
-7. **MVP (Minimum Viable Product) Scope**
-   - What is the smallest version that delivers value?
-   - Core workflows or user journeys included.
-   - What is the unique selling point (USP) of the app?
-   - What is the potential for the app to grow?
-   - What is the potential market size?
-   - What’s intentionally left out at the MVP stage?
+        7. **MVP (Minimum Viable Product) Scope**
+        - What is the smallest version that delivers value?
+        - Core workflows or user journeys included.
+        - What is the unique selling point (USP) of the app?
+        - What is the potential for the app to grow?
+        - What is the potential market size?
+        - What’s intentionally left out at the MVP stage?
 
-8. **Product Roadmap (MVP → V1 → V2 → Full Product)**
-   - Describe how the product evolves across 3–4 stages.
-   - Mention features, scalability goals, and potential integrations per stage.
-   - Include **metrics by phase** (e.g., MVP: early retention; V1: engagement growth; V2: revenue scale).
+        8. **Product Roadmap (MVP → V1 → V2 → Full Product)**
+        - Describe how the product evolves across 3–4 stages.
+        - Mention features, scalability goals, and potential integrations per stage.
+        - Include **metrics by phase** (e.g., MVP: early retention; V1: engagement growth; V2: revenue scale).
 
-9. **User Experience & Design Considerations**
-   - **Core user flow:** Step-by-step journey (e.g., onboarding → first transaction → feedback loop).
-   - **Onboarding experience:** How users are guided and educated.
-   - **Retention or engagement loop:** Notifications, gamification, or habit-forming mechanisms.
-   - Include a short **user journey map** that captures key touchpoints and emotional states.
+        9. **User Experience & Design Considerations**
+        - **Core user flow:** Step-by-step journey (e.g., onboarding → first transaction → feedback loop).
+        - **Onboarding experience:** How users are guided and educated.
+        - **Retention or engagement loop:** Notifications, gamification, or habit-forming mechanisms.
+        - Include a short **user journey map** that captures key touchpoints and emotional states.
 
-10. **Technical Implementation Overview**
-    - Recommended tech stack (frontend, backend, database, etc.)
-    - Architecture choice (monolith, microservices, or serverless)
-    - APIs or integrations needed
-    - Scalability and performance considerations
-    - Deployment environment (e.g., AWS, GCP, Vercel)
-    - CI/CD pipeline and monitoring stack (e.g., GitHub Actions, Sentry, Datadog)
-    - Include **compliance considerations** such as KYC/AML, GDPR, or data privacy requirements.
+        10. **Technical Implementation Overview**
+            - Recommended tech stack (frontend, backend, database, etc.)
+            - Architecture choice (monolith, microservices, or serverless)
+            - APIs or integrations needed
+            - Scalability and performance considerations
+            - Deployment environment (e.g., AWS, GCP, Vercel)
+            - CI/CD pipeline and monitoring stack (e.g., GitHub Actions, Sentry, Datadog)
+            - Include **compliance considerations** such as KYC/AML, GDPR, or data privacy requirements.
 
-11. **Business Model**
-    - Overall business model type (e.g., subscription, SaaS, freemium, transaction-based)
-    - Pricing strategy
-    - Customer acquisition and retention model
-    - Include a **basic monetization forecast** (example: user volume × pricing = projected MRR or ARR)
+        11. **Business Model**
+            - Overall business model type (e.g., subscription, SaaS, freemium, transaction-based)
+            - Pricing strategy
+            - Customer acquisition and retention model
+            - Include a **basic monetization forecast** (example: user volume × pricing = projected MRR or ARR)
 
-12. **Possible Monetization Strategies**
-    - List 3–5 monetization options or revenue streams.
-    - Include both short-term and long-term opportunities.
-    - Examples: freemium plans, in-app purchases, B2B licensing, API usage fees, ads, affiliate marketing, data insights, white-label options, partnerships.
-    - Identify which monetization strategies best fit the MVP stage vs. later scaling stages.
+        12. **Possible Monetization Strategies**
+            - List 3–5 monetization options or revenue streams.
+            - Include both short-term and long-term opportunities.
+            - Examples: freemium plans, in-app purchases, B2B licensing, API usage fees, ads, affiliate marketing, data insights, white-label options, partnerships.
+            - Identify which monetization strategies best fit the MVP stage vs. later scaling stages.
 
-13. **Go-To-Market Strategy**
-    - Launch sequence (beta → public launch → expansion)
-    - Growth channels (organic, paid, partnerships, influencer, community)
-    - Early adopter acquisition tactics
-    - Community-building and brand positioning plans
-    - Include a brief **content and marketing timeline** (e.g., weekly or monthly themes for launch period)
+        13. **Go-To-Market Strategy**
+            - Launch sequence (beta → public launch → expansion)
+            - Growth channels (organic, paid, partnerships, influencer, community)
+            - Early adopter acquisition tactics
+            - Community-building and brand positioning plans
+            - Include a brief **content and marketing timeline** (e.g., weekly or monthly themes for launch period)
 
-14. **Success Metrics**
-    - KPIs to track post-launch (user growth, engagement, retention, conversion, churn, and revenue)
-    - Break down KPIs per phase (MVP, V1, V2) for clarity.
+        14. **Success Metrics**
+            - KPIs to track post-launch (user growth, engagement, retention, conversion, churn, and revenue)
+            - Break down KPIs per phase (MVP, V1, V2) for clarity.
 
-15. **Challenges & Risks**
-    - Technical, operational, market, or regulatory risks
-    - Mitigation strategies and fallback options
-    - Include a short “lessons from competitors” insight, if applicable.
+        15. **Challenges & Risks**
+            - Technical, operational, market, or regulatory risks
+            - Mitigation strategies and fallback options
+            - Include a short “lessons from competitors” insight, if applicable.
 
-16. **Team & Skills Required**
-    - Outline key roles needed for MVP and scaling stages (e.g., Product Manager, Full-Stack Engineer, UI/UX Designer, Security Engineer, Marketing Lead)
-    - Briefly state responsibilities per role.
+        16. **Team & Skills Required**
+            - Outline key roles needed for MVP and scaling stages (e.g., Product Manager, Full-Stack Engineer, UI/UX Designer, Security Engineer, Marketing Lead)
+            - Briefly state responsibilities per role.
 
-17. **Long-Term Opportunities**
-    - Potential expansions (features, integrations, new markets)
-    - Strategic partnerships or ecosystem opportunities
-    - Future roadmap for scaling globally
-    - End with a **5-Year Vision:** Describe what the app could evolve into — e.g., an intelligent platform, a marketplace, or a full ecosystem.
+        17. **Long-Term Opportunities**
+            - Potential expansions (features, integrations, new markets)
+            - Strategic partnerships or ecosystem opportunities
+            - Future roadmap for scaling globally
+            - End with a **5-Year Vision:** Describe what the app could evolve into — e.g., an intelligent platform, a marketplace, or a full ecosystem.
 
-Your response should read like a **founder’s detailed product vision document** — 
-clear, strategic, investor-ready, and comprehensive enough for a startup team to use 
-as a step-by-step roadmap from MVP to a fully launched and monetized product.
-"""
+        Your response should read like a **founder’s detailed product vision document** — 
+        clear, strategic, investor-ready, and comprehensive enough for a startup team to use 
+        as a step-by-step roadmap from MVP to a fully launched and monetized product."""
 
 
 # ========== Main Flow ==========
 
-performance_review_template = """
-You are a strategic product analyst and business reviewer. 
-Given this context:
-{context}
+performance_review_template = """You are a strategic product analyst and business reviewer. 
+        Given this context:
+        {context}
 
-Generate a **comprehensive performance report** on the product or company, focusing on results, lessons, and future directions.
+        Generate a **comprehensive performance report** on the product or company, focusing on results, lessons, and future directions.
 
-Your report should cover the following sections:
+        Your report should cover the following sections:
 
-1. **Executive Summary**
-   - Brief overview of the product or company
-   - Key goals or KPIs initially set
-   - Short summary of the overall performance (successes and challenges)
+        1. **Executive Summary**
+        - Brief overview of the product or company
+        - Key goals or KPIs initially set
+        - Short summary of the overall performance (successes and challenges)
 
-2. **Customer Insights & Pain Points**
-   - What user pain points were identified at launch?
-   - How effectively were they solved?
-   - What new pain points or unmet needs have emerged?
-   - Include user feedback highlights or sentiment trends.
+        2. **Customer Insights & Pain Points**
+        - What user pain points were identified at launch?
+        - How effectively were they solved?
+        - What new pain points or unmet needs have emerged?
+        - Include user feedback highlights or sentiment trends.
 
-3. **Product Performance**
-   - What worked well (features, user experience, engagement)?
-   - What didn’t work or underperformed (features, design choices, functionality)?
-   - Adoption metrics, engagement data, or usage trends.
+        3. **Product Performance**
+        - What worked well (features, user experience, engagement)?
+        - What didn’t work or underperformed (features, design choices, functionality)?
+        - Adoption metrics, engagement data, or usage trends.
 
-4. **Business & Market Performance**
-   - Revenue performance vs. projections
-   - Customer acquisition and retention analysis
-   - Market share and competitive positioning
+        4. **Business & Market Performance**
+        - Revenue performance vs. projections
+        - Customer acquisition and retention analysis
+        - Market share and competitive positioning
 
-5. **Operational Review**
-   - Internal execution and workflow effectiveness
-   - Bottlenecks or inefficiencies
-   - Team culture and alignment
+        5. **Operational Review**
+        - Internal execution and workflow effectiveness
+        - Bottlenecks or inefficiencies
+        - Team culture and alignment
 
-6. **Marketing & Growth Review**
-   - Performance of marketing and acquisition channels
-   - Conversion funnel analysis
-   - Brand perception and community engagement
+        6. **Marketing & Growth Review**
+        - Performance of marketing and acquisition channels
+        - Conversion funnel analysis
+        - Brand perception and community engagement
 
-7. **Technology & Infrastructure Review**
-   - Stability, uptime, scalability
-   - Key bugs, performance bottlenecks, or technical debt
-   - Architecture or tech-stack lessons learned
+        7. **Technology & Infrastructure Review**
+        - Stability, uptime, scalability
+        - Key bugs, performance bottlenecks, or technical debt
+        - Architecture or tech-stack lessons learned
 
-8. **Financial Overview**
-   - Revenue and cost breakdown
-   - Profitability trends and key financial metrics
+        8. **Financial Overview**
+        - Revenue and cost breakdown
+        - Profitability trends and key financial metrics
 
-9. **Lessons Learned**
-   - Key wins, mistakes, and insights
-   - Assumptions that proved right or wrong
+        9. **Lessons Learned**
+        - Key wins, mistakes, and insights
+        - Assumptions that proved right or wrong
 
-10. **Strategic Adjustments & Next Steps**
-    - Planned improvements and pivots
-    - Areas to deprioritize or sunset
+        10. **Strategic Adjustments & Next Steps**
+            - Planned improvements and pivots
+            - Areas to deprioritize or sunset
 
-11. **Future Roadmap**
-    - Short-term (3–6 months): Key fixes or goals
-    - Mid-term (6–12 months): Growth and optimization
-    - Long-term (1–3 years): Vision and scaling goals
+        11. **Future Roadmap**
+            - Short-term (3–6 months): Key fixes or goals
+            - Mid-term (6–12 months): Growth and optimization
+            - Long-term (1–3 years): Vision and scaling goals
 
-12. **Risks & Mitigation**
-    - Key forward risks
-    - Mitigation strategies
+        12. **Risks & Mitigation**
+            - Key forward risks
+            - Mitigation strategies
 
-13. **Conclusion**
-    - Summary of momentum and outlook
-    - Strategic recommendations for next phase
+        13. **Conclusion**
+            - Summary of momentum and outlook
+            - Strategic recommendations for next phase
 
-Your response should read like a **professional product performance report** — 
-data-driven, reflective, and actionable.
-"""
+        Your response should read like a **professional product performance report** — 
+        data-driven, reflective, and actionable."""
 
 def make_performance_review_chain(llm):
     prompt = PromptTemplate(input_variables=["context"], template=performance_review_template)
@@ -443,20 +444,18 @@ def _handle_ollama_403_error(error: Exception) -> Optional[Dict[str, str]]:
         return None
     
     use_ollama = os.getenv("USE_OLLAMA", "true").lower()
-    error_details = f"""
-Error: Ollama API request failed (403)
+    error_details = f"""Error: Ollama API request failed (403)
 
-Configuration:
-- USE_OLLAMA: {use_ollama}
+        Configuration:
+        - USE_OLLAMA: {use_ollama}
 
-Possible solutions:
-1. Check if Ollama is running: `ollama serve` or `curl http://localhost:11434/api/tags`
-2. Check if your Ollama instance is accessible
-3. Try setting USE_OLLAMA=false in .env to use OpenAI instead
+        Possible solutions:
+        1. Check if Ollama is running: `ollama serve` or `curl http://localhost:11434/api/tags`
+        2. Check if your Ollama instance is accessible
+        3. Try setting USE_OLLAMA=false in .env to use OpenAI instead
 
-Error details: {error_msg}
-Error type: {error_type}
-"""
+        Error details: {error_msg}
+        Error type: {error_type}"""
     return {"error": error_details.strip()}
 
 def _invoke_chain_safely(chain, input_data: Dict[str, str], fallback_key: str = "") -> str:
@@ -540,95 +539,6 @@ def generate_reddit_report_structured(url: str) -> Dict[str, Any]:
         print(f"Error in generate_reddit_report_structured: {str(e)}")
         return {"error": f"Error generating report: {str(e)}"}
 
-def extract_quote_from_text(description: str, thread_text: str) -> str:
-    """
-    Extract a relevant quote from the thread text based on the pain point description.
-    This is a fallback when the LLM doesn't provide quotes.
-    """
-    if not description or not thread_text:
-        print(f"DEBUG extract_quote: Missing description or thread_text. desc={bool(description)}, thread={bool(thread_text)}")
-        return ""
-    
-    # Extract keywords from description
-    keywords = []
-    # Remove common words and extract meaningful terms
-    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'not', 'has', 'have', 'this', 'that', 'these', 'those'}
-    words = description.lower().split()
-    # Extract keywords - include words >= 3 chars, and also important short words like "fee", "usd", "usdt"
-    important_short_words = {'fee', 'fees', 'usd', 'usdt', 'btc', 'eth', 'crypto', 'coinbase', 'kraken', 'transfer', 'withdraw'}
-    keywords = [w.strip('.,!?;:') for w in words if (w not in stop_words and len(w) >= 3) or w in important_short_words]
-    
-    print(f"DEBUG extract_quote: Extracted keywords from '{description[:50]}...': {keywords[:8]}")
-    
-    if not keywords:
-        print("DEBUG extract_quote: No keywords extracted")
-        return ""
-    
-    # Split thread into sentences - use more flexible splitting
-    # First try standard sentence splitting
-    sentences = re.split(r'[.!?]\s+', thread_text)
-    # Also split on newlines that might indicate separate thoughts
-    all_sentences = []
-    for sent in sentences:
-        # Further split on newlines
-        sub_sents = sent.split('\n')
-        for sub_sent in sub_sents:
-            sub_sent = sub_sent.strip()
-            if sub_sent:
-                all_sentences.append(sub_sent)
-    
-    print(f"DEBUG extract_quote: Split into {len(all_sentences)} sentences")
-    
-    # Find sentences that contain keywords from the description
-    best_match = ""
-    best_score = 0
-    
-    for sentence in all_sentences:
-        sentence = sentence.strip()
-        # More lenient length requirements
-        if len(sentence) < 15 or len(sentence) > 400:
-            continue
-        
-        # Count how many keywords appear in this sentence (case-insensitive)
-        sentence_lower = sentence.lower()
-        score = sum(1 for keyword in keywords if keyword in sentence_lower)
-        
-        # Prefer sentences with multiple keywords and reasonable length
-        if score > best_score and score > 0:
-            best_score = score
-            best_match = sentence
-    
-    # If we found a good match, return it
-    if best_match:
-        print(f"DEBUG extract_quote: Found match with score {best_score}: {best_match[:150]}...")
-        return best_match[:250]  # Limit quote length
-    
-    # Fallback: return first sentence that contains any keyword (even partial matches)
-    for sentence in all_sentences:
-        sentence = sentence.strip()
-        if len(sentence) >= 15 and len(sentence) <= 300:
-            sentence_lower = sentence.lower()
-            # Check if any keyword appears in the sentence
-            if any(keyword in sentence_lower for keyword in keywords[:5]):  # Check top 5 keywords
-                print(f"DEBUG extract_quote: Found fallback match: {sentence[:150]}...")
-                return sentence[:250]
-    
-    # Last resort: try to find sentences with partial keyword matches
-    for sentence in all_sentences:
-        sentence = sentence.strip()
-        if len(sentence) >= 20 and len(sentence) <= 250:
-            sentence_lower = sentence.lower()
-            # Check if any significant part of keywords match
-            for keyword in keywords[:3]:
-                if len(keyword) >= 4 and keyword[:4] in sentence_lower:
-                    print(f"DEBUG extract_quote: Found partial match for '{keyword}': {sentence[:150]}...")
-                    return sentence[:250]
-    
-    print(f"DEBUG extract_quote: No match found for description: {description[:50]}")
-    print(f"DEBUG extract_quote: Keywords searched: {keywords[:5]}")
-    print(f"DEBUG extract_quote: First 200 chars of thread: {thread_text[:200]}")
-    return ""
-
 def save_report(report: str, filename: str = "report.txt"):
     # This will create the file in the **current working directory**
     cwd = os.getcwd()
@@ -636,6 +546,80 @@ def save_report(report: str, filename: str = "report.txt"):
     with open(fullpath, "w", encoding="utf-8") as f:
         f.write(report)
     print(f"Report saved to {fullpath}")
+
+
+
+
+def parse_llm_painpoints(raw_text):
+    """
+    Converts LLM-formatted pain point bullets into a clean JSON structure.
+    Handles:
+      - Bold titles (e.g., **Title**)
+      - Multi-line quotes
+      - Implicit quotes
+      - Authors following "—"
+      - Multiple quotes per bullet section
+    Returns:
+      - JSON list of pain points with quotes, authors, and number of unique mentions
+    """
+    
+
+    pain_points = []
+
+    # Split on bullets
+    sections = re.split(r"^\s*•", raw_text, flags=re.MULTILINE)
+    sections = [s.strip() for s in sections if s.strip()]
+
+    for section in sections:
+
+        # Extract title inside ** **
+        title_match = re.search(r"\*\*(.*?)\*\*", section)
+        if not title_match:
+            continue
+
+        title = title_match.group(1).strip()
+
+        quotes_list = []
+
+        # Check for implicit pain point
+        if "Implicit" in section or "implicit" in section:
+            quotes_list.append({
+                "quote": "(Implicit, not explicitly quoted)",
+                "author": None
+            })
+            num_mentions = 0  # No user explicitly mentioned
+        else:
+            # Extract quotes (text inside quotes "...")
+            raw_quotes = re.findall(r'"(.*?)"', section, flags=re.DOTALL)
+
+            authors_seen = set()
+            for q in raw_quotes:
+                # Try to extract author for this specific quote
+                pattern = re.escape(f'"{q}"') + r'\s*—\s*([^\n]+)'
+                author_match = re.search(pattern, section)
+
+                author = author_match.group(1).strip() if author_match else None
+                if author:
+                    authors_seen.add(author)
+
+                quotes_list.append({
+                    "quote": q.strip(),
+                    "author": author
+                })
+
+            num_mentions = len(authors_seen)
+
+            # If no authors found, count as 1 mention per quote
+            if num_mentions == 0:
+                num_mentions = len(quotes_list)
+
+        pain_points.append({
+            "title": title,
+            "quotes": quotes_list,
+            "num_mentions": num_mentions
+        })
+
+    return pain_points
 
 # ========== FastAPI Application ==========
 
@@ -657,6 +641,48 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+@app.get("/api/v1/idea")
+async def generate_idea(url: str):
+    try:
+        # Initialize Reddit client with error handling
+        reddit = praw.Reddit(
+            client_id=os.getenv("REDDIT_CLIENT_ID"),
+            client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+            user_agent=os.getenv("REDDIT_USER_AGENT") or "app-idea-generator"
+        )
+        
+        # Test Reddit connection
+        if not reddit.read_only:
+            return {"error": "Error: Reddit API credentials not properly configured"}
+        
+        thread_text = fetch_reddit_thread(reddit, url)
+        
+        if not thread_text or len(thread_text.strip()) < 10:
+            return {"error": "Error: Could not fetch thread content or thread is empty"}
+
+        llm = choose_llm(use_json_mode=False)  # Use text mode for formatted output
+        pain_chain = make_painpoint_chain(llm)
+
+        # Invoke chains with error handling
+        try:
+            pain_resp = _invoke_chain_safely(
+                pain_chain, 
+                {"thread_text": thread_text}, 
+                fallback_key="pain_points"
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+
+        return {
+            "pain_points": parse_llm_painpoints(pain_resp),
+            "painpoint_count": len(parse_llm_painpoints(pain_resp)),
+            "url": url
+        }
+    except Exception as e:
+        # Log the error and return a safe error message
+        print(f"Error in generate_reddit_report_structured: {str(e)}")
+        return {"error": f"Error generating report: {str(e)}"}
 
 if __name__ == "__main__":
     import sys
@@ -713,3 +739,12 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Unexpected error: {str(e)}")
             print("Please check your input and try again")
+
+
+
+
+
+
+
+
+
