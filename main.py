@@ -1,4 +1,4 @@
-import os
+import os, json
 from dotenv import load_dotenv
 import re
 
@@ -14,7 +14,250 @@ from langchain_openai import ChatOpenAI
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from langchain_core.output_parsers import PydanticOutputParser
+from typing import List, Optional\
 
+
+
+
+# ========== Pydantic Models for Structured Output ==========
+
+class Quote(BaseModel):
+    user: str = Field(description="The username of the user who expressed the pain point")
+    quote: str = Field(description="A short quote from the text, 1-2 sentences")
+
+class PainPoint(BaseModel):
+    title: str = Field(description="The title of the pain point")
+    number_of_users: int = Field(description="The number of unique users who expressed the pain point")
+    category: str = Field(description="The category of the pain point")
+    quote: List[Quote]
+
+
+# ─────────────────────────────────────────
+# USER JOURNEY + PAIN POINT MAPPING
+# ─────────────────────────────────────────
+
+class UserJourneyStep(BaseModel):
+    step: str = Field(description="The name of the step in the user journey")
+    touchpoint: str = Field(description="Where the user interacts at this step")
+    emotional_state: str = Field(description="How the user feels at this step")
+
+
+class Feature(BaseModel):
+    feature_name: str = Field(description="Name of the feature")
+    description: str = Field(description="Short explanation of what the feature does")
+    is_mvp_feature: bool = Field(description="Whether this feature is included in the MVP")
+
+
+class PainPointMapping(BaseModel):
+    feature_name: str = Field(description="The feature addressing pain points")
+    solves_pain_points: List[str] = Field(description="Pain points addressed by this feature")
+    value_created: str = Field(description="Description of the value produced by solving the pain points")
+
+
+# ─────────────────────────────────────────
+# COMPETITIVE LANDSCAPE
+# ─────────────────────────────────────────
+
+class Competitor(BaseModel):
+    name: str = Field(description="Competitor or similar product")
+    strengths: str = Field(description="What they do well")
+    weaknesses: str = Field(description="Where they fall short")
+    comparison_summary: str = Field(description="Summary of how the proposed app compares")
+
+
+class CompetitiveLandscape(BaseModel):
+    competitors: List[Competitor]
+    unique_differentiators: str = Field(description="Key elements that set this app apart")
+    market_gaps: str = Field(description="Gaps in the market the product will fill")
+
+
+# ─────────────────────────────────────────
+# ROADMAP STAGES
+# ─────────────────────────────────────────
+
+class RoadmapStage(BaseModel):
+    features: List[str] = Field(description="Features included in this stage")
+    goals: str = Field(description="Primary goals for this stage")
+    metrics: List[str] = Field(description="Key metrics used to measure success in this stage")
+
+
+class ProductRoadmap(BaseModel):
+    mvp: RoadmapStage
+    v1: RoadmapStage
+    v2: RoadmapStage
+    full_product: RoadmapStage
+
+
+# ─────────────────────────────────────────
+# INDUSTRY + USERS
+# ─────────────────────────────────────────
+
+class Industry(BaseModel):
+    sector: str = Field(description="Industry category the app belongs to")
+    problem_solved: str = Field(description="Description of the core problem the app solves")
+    target_audience: str = Field(description="The audience the product is for")
+    business_stage: str = Field(description="Idea stage, prototype, early-stage startup, etc.")
+
+
+class TargetUsers(BaseModel):
+    primary_users: str = Field(description="Main intended users")
+    secondary_users: str = Field(description="Secondary or optional users")
+    motivations: str = Field(description="What drives these users to adopt the product")
+    demographics_and_behavior: str = Field(description="Key traits, habits, or contexts of use")
+
+
+# ─────────────────────────────────────────
+# TECH + COMPLIANCE
+# ─────────────────────────────────────────
+
+class TechStack(BaseModel):
+    frontend: str
+    backend: str
+    database: str
+    mobile: Optional[str] = None
+    other: Optional[str] = None
+
+
+class CICDAndMonitoring(BaseModel):
+    pipeline: str = Field(description="CI/CD tools or processes in use")
+    monitoring_tools: str = Field(description="Tools used for error tracking and monitoring")
+
+
+class Compliance(BaseModel):
+    kyc_aml: bool = Field(description="Whether KYC/AML is required")
+    gdpr: bool = Field(description="Whether GDPR compliance is required")
+    data_privacy: str = Field(description="Notes on data privacy requirements")
+
+
+class TechnicalImplementation(BaseModel):
+    tech_stack: TechStack
+    architecture: str = Field(description="Monolith, microservices, serverless, etc.")
+    required_integrations: List[str] = Field(description="APIs or services required")
+    scalability_considerations: str = Field(description="How the system will scale")
+    deployment_environment: str = Field(description="AWS, GCP, Vercel, etc.")
+    cicd_and_monitoring: CICDAndMonitoring
+    compliance: Compliance
+
+
+# ─────────────────────────────────────────
+# BUSINESS MODEL
+# ─────────────────────────────────────────
+
+class MonetizationForecast(BaseModel):
+    user_volume: str = Field(description="Expected number of users")
+    pricing: str = Field(description="Pricing for the model")
+    projected_revenue: str = Field(description="MRR/ARR estimate or equivalent")
+
+
+class BusinessModel(BaseModel):
+    model_type: str = Field(description="SaaS, subscription, freemium, etc.")
+    pricing_strategy: str = Field(description="How the product will be priced")
+    customer_acquisition: str = Field(description="How new users will be acquired")
+    customer_retention: str = Field(description="How existing users will be retained")
+    monetization_forecast: MonetizationForecast
+
+
+class MonetizationStrategy(BaseModel):
+    strategy_name: str
+    description: str
+    ideal_stage: str = Field(description="Stage where this strategy is most appropriate: MVP, V1, scaling")
+
+
+# ─────────────────────────────────────────
+# GO-TO-MARKET + METRICS
+# ─────────────────────────────────────────
+
+class GoToMarket(BaseModel):
+    launch_sequence: List[str] = Field(description="Beta → launch → expansion steps")
+    growth_channels: List[str] = Field(description="Marketing or growth channels")
+    early_adopter_tactics: str = Field(description="Ways to attract first users")
+    community_building: str = Field(description="How to build a community around the app")
+    content_marketing_timeline: List[str] = Field(description="Content themes by week or month")
+
+
+class SuccessMetrics(BaseModel):
+    mvp: List[str]
+    v1: List[str]
+    v2: List[str]
+    overall_kpis: List[str]
+
+
+# ─────────────────────────────────────────
+# TEAM + LONG-TERM
+# ─────────────────────────────────────────
+
+class TeamRole(BaseModel):
+    role: str = Field(description="Name of the role")
+    responsibilities: str = Field(description="What this role is responsible for")
+
+
+class LongTermOpportunities(BaseModel):
+    feature_expansion: List[str]
+    integrations: List[str]
+    new_markets: List[str]
+    strategic_partnerships: List[str]
+    five_year_vision: str = Field(description="High-level view of where the app is going long-term")
+
+
+# ─────────────────────────────────────────
+# MVP SCOPE
+# ─────────────────────────────────────────
+
+class MVPScope(BaseModel):
+    core_value: str = Field(description="Smallest version that provides meaningful value")
+    included_workflows: List[str] = Field(description="User journeys included in MVP")
+    unique_selling_point: str = Field(description="USP of the MVP")
+    growth_potential: str = Field(description="Potential for expansion")
+    market_size_estimate: str = Field(description="Market TAM/SAM/SOM or a rough estimate")
+    excluded_from_mvp: List[str] = Field(description="What is intentionally not included")
+
+class ExtractedPainPoint(BaseModel):
+    title: str
+    number_of_users: int
+    category: str
+    quotes: List[str]
+# ─────────────────────────────────────────
+# MAIN APP MODEL
+# ─────────────────────────────────────────
+
+class PainPointsOutput(BaseModel): 
+    pain_points: List[PainPoint]
+    number_of_pain_points: int
+
+class ChallengesAndRisks(BaseModel):
+    risks: List[str] = Field(description="List of major risks")
+    mitigation: List[str] = Field(description="How to mitigate each risk")
+    competitor_lessons: str = Field(description="Insights from competitor failures or weaknesses")
+
+class AppIdea(BaseModel):
+    app_name: str
+    one_sentence_description: str
+    problem_summary: str
+    value_proposition: str
+    vision: str
+    industry: Industry
+    target_users: TargetUsers
+    competitive_landscape: CompetitiveLandscape
+    core_features: List[Feature]
+    pain_point_mapping: List[PainPointMapping]
+    mvp_scope: MVPScope
+    product_roadmap: ProductRoadmap
+    user_experience: List[UserJourneyStep]
+    technical_implementation: TechnicalImplementation
+    business_model: BusinessModel
+    monetization_strategies: List[MonetizationStrategy]
+    go_to_market_strategy: GoToMarket
+    success_metrics: SuccessMetrics
+    challenges_and_risks: ChallengesAndRisks
+    team_and_skills: List[TeamRole]
+    long_term_opportunities: LongTermOpportunities
+
+class AppIdeasOutput(BaseModel):
+    app_ideas: List[AppIdea]
+
+    class Config:
+        extra = "ignore"
 
 # ========== Reddit Fetching ==========
 
@@ -60,17 +303,6 @@ def fetch_reddit_thread(reddit, url: str, limit_comments: int = 100) -> str:
 
     return "\n".join(texts)
 
-# ========== Pydantic Models for Structured Output ==========
-
-class PainPointModel(BaseModel):
-    """Model for a single pain point"""
-    description: str = Field(description="The pain point description")
-    sentiment: str = Field(description="The sentiment, must be one of: negative, positive, or neutral")
-    quote: str = Field(description="A short quote from the text, 1-2 sentences")
-
-class PainPointsListModel(BaseModel):
-    """Model for a list of pain points"""
-    pain_points: List[PainPointModel] = Field(description="List of pain points extracted from the discussion")
 
 # ========== LLM Chains for Extraction & Idea ==========
 
@@ -78,34 +310,25 @@ def make_painpoint_chain(llm):
     """Create a chain for pain points extraction with formatted output"""
     # Enhanced prompt with clear instructions for formatted text output
     prompt = PromptTemplate(
-        template="""You are an expert product analyst. Analyze the conversation/thread text below and extract the main **user pain points** being discussed.
+        template="""You are an expert product analyst. Analyze the conversation/thread text below and extract the main user pain points, then produce a comprehensive product strategy. Follow the rules EXACTLY.
 
-            CRITICAL REQUIREMENTS:
-            1. Extract **real, meaningful** pain points from the actual text. Do NOT produce vague or empty descriptions.
-            2. For EACH pain point, you MUST include:
-                - A short title summarizing the pain point.
-                - The **number of unique users** who mentioned or implied this pain point.
-                - At least one **direct quote** (1–2 sentences) from the text, copied EXACTLY.
-            3. Quotes must be copied **exactly** from the thread text — no paraphrasing.
-            4. When a username/author is available, include attribution (e.g., *"— Username"*).
-            5. If multiple users expressed the same pain point, include multiple quotes and count them.
-            6. If a pain point is inferred but not explicitly stated, label the quote section as: *(Implicit, not explicitly quoted)*.
-            7. **MANDATORY:** Return **at least 3 pain points** — ideally 5–10. Never return fewer than 3.
-            8. Final output must be formatted as bullet points:
-                - Start with a bullet (•)
-                - Pain point title in **bold**
-                - Followed by: *(X users complained)*   
-                - Then list the quotes under an indented block.
+            CRITICAL EXTRACTION RULES:
+            1. Extract only real and meaningful pain points from the actual text.
+            2. For EACH pain point include:
+                - title
+                - number_of_users
+                - category
+                - quotes (array of quotes)
+            3. Quotes must be copied EXACTLY — no paraphrasing.
+            4. Include username attribution when available.
+            5. If multiple users mention the same issue, include multiple quotes.
+            6. If the pain point is implied (not quoted), use: "quote": "Implicit, not explicitly quoted".
+            7. You MUST return at least 3 pain points. If the text has fewer than 3, merge smaller related issues into distinct categories.
+            8. After extraction, propose 3–5 app ideas that directly address these issues.
+            9. Then generate a complete product vision strategy following all sections defined below.
+            10. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
 
-            ===== EXAMPLE (DO NOT INCLUDE IN OUTPUT) =====
-            • **High withdrawal fees** *(2 users complained)*: 
-                "Coinbase charges $906 for the fee..." — Beardog907
-                "Coinbase overcharges for withdrawals." — Blacknoyzz
-
-            • **Uncertainty about fees** *(2 users complained)*:
-                "What is the justification for cb charging this much?" — 7venhigh
-                "Coinbase charges exorbitant fees..." — Whitenoyzz
-            ===== END OF EXAMPLE =====
+            
             Thread text:
             {thread_text}
             
@@ -115,11 +338,12 @@ def make_painpoint_chain(llm):
         )
     
     # Simple chain - no JSON format needed for formatted text output
+    #parser = PydanticOutputParser(pydantic_object=AppIdeasOutput)
     chain = prompt | llm
     return chain
 
 # Prompt for idea generation (multiple ideas with structured data)
-idea_template = """You are an innovative product strategist and system designer. 
+idea_template_single2 = """You are an innovative product strategist and system designer. 
         Given these pain points:
         {pain_points}
 
@@ -140,16 +364,16 @@ idea_template = """You are an innovative product strategist and system designer.
         Format your response as readable text with clear sections and formatting. Use markdown formatting for headers, bullet points, and emphasis."""
 
 # Prompt for single idea generation (for backward compatibility)
-idea_template_single = """You are an innovative product strategist and system designer. 
+idea_multiple_single2 = """You are an innovative product strategist and system designer. 
         Given these pain points:
         {pain_points}
 
-        Propose **one** app idea or digital solution (name it) that directly addresses these issues. 
+        Propose **3-5** app ideas app idea or digital solution (name it) that directly addresses these issues. 
         Then provide a **comprehensive and actionable product roadmap** covering the following:
 
         1. **Product Overview**
         - App Name
-        - One-sentence description
+        - One-sentence description of what the solution/product/business/app is
         - Problem Summary
         - **Value Proposition Summary:** State clearly how the solution stands out from competitors and what makes it unique or indispensable.
         - Vision and long-term goal
@@ -247,6 +471,153 @@ idea_template_single = """You are an innovative product strategist and system de
         clear, strategic, investor-ready, and comprehensive enough for a startup team to use 
         as a step-by-step roadmap from MVP to a fully launched and monetized product."""
 
+idea_multiple_single = """You are an innovative product strategist and system designer. 
+        Given these pain points:
+        {pain_points}
+
+        PRODUCT STRATEGY SECTIONS TO GENERATE FOR EACH APP IDEA:
+            1. Product Overview
+            2. Industry
+            3. Target Users
+            4. Competitive Landscape
+            5. Core Features (MVP + later versions)
+            6. Mapping Between Features and Pain Points
+            7. MVP Scope
+            8. Product Roadmap (MVP → V1 → V2 → Full Product)
+            9. UX & Design Considerations
+            10. Technical Implementation Overview
+            11. Business Model
+            12. Monetization Strategies
+            13. Go-To-Market Strategy
+            14. Success Metrics
+            15. Challenges & Risks
+            16. Team & Skills Required
+            17. Long-Term Opportunities & 5-Year Vision
+
+            You must fill every section. If information is missing, make reasonable assumptions.
+
+            FINAL OUTPUT FORMAT (MANDATORY EXACT JSON STRUCTURE):
+
+            {{
+            "pain_points": [
+                {{
+                "title": "",
+                "number_of_users": 0,
+                "category": "",
+                "quotes": [
+                    {{
+                    "user": "",
+                    "quote": ""
+                    }}
+                ]
+                }}
+            ],
+            "number_of_pain_points": 0,
+            "app_ideas": [
+                {{
+                "app_name": "",
+                "one_sentence_description": "",
+                "problem_summary": "",
+                "value_proposition_summary": "",
+                "vision": "",
+                "industry": {{
+                    "industry_name": "",
+                    "problem_solved": "",
+                    "target_audience": "",
+                    "business_stage": ""
+                }},
+                "target_users": {{
+                    "primary_users": "",
+                    "secondary_users": "",
+                    "motivations": "",
+                    "demographics": "",
+                    "behaviors": ""
+                }},
+                "competitive_landscape": [
+                    {{
+                    "competitor_name": "",
+                    "comparison_summary": ""
+                    }}
+                ],
+                "core_features": {{
+                    "mvp": [],
+                    "v1_plus": []
+                }},
+                "pain_point_mapping": [
+                    {{
+                    "feature": "",
+                    "addresses_pain_points": []
+                    }}
+                ],
+                "mvp_scope": {{
+                    "core_workflows": [],
+                    "usp": "",
+                    "market_potential": "",
+                    "intentionally_excluded": []
+                }},
+                "product_roadmap": {{
+                    "mvp": "",
+                    "v1": "",
+                    "v2": "",
+                    "full_product": ""
+                }},
+                "ux_design": {{
+                    "core_user_flow": "",
+                    "onboarding": "",
+                    "engagement_loop": "",
+                    "user_journey_map": ""
+                }},
+                "technical_implementation": {{
+                    "frontend": "",
+                    "backend": "",
+                    "database": "",
+                    "architecture": "",
+                    "integrations": [],
+                    "scalability": "",
+                    "deployment": "",
+                    "cicd": "",
+                    "compliance": ""
+                }},
+                "business_model": {{
+                    "model_type": "",
+                    "pricing": "",
+                    "acquisition_strategy": "",
+                    "forecast": ""
+                }},
+                "monetization_strategies": [],
+                "go_to_market": {{
+                    "launch_sequence": "",
+                    "growth_channels": "",
+                    "early_adopter_strategy": "",
+                    "marketing_timeline": ""
+                }},
+                "success_metrics": {{
+                    "mvp": [],
+                    "v1": [],
+                    "v2": []
+                }},
+                "challenges_risks": {{
+                    "risks": [],
+                    "mitigation": [],
+                    "competitor_lessons": ""
+                }},
+                "team": [
+                    {{
+                    "role": "",
+                    "responsibility": ""
+                    }}
+                ],
+                "long_term_opportunities": {{
+                    "expansions": [],
+                    "partnerships": [],
+                    "global_scale_opportunity": "",
+                    "five_year_vision": ""
+                }}
+                }}
+            ]
+            }}"""
+
+
 
 # ========== Main Flow ==========
 
@@ -322,15 +693,17 @@ performance_review_template = """You are a strategic product analyst and busines
         Your response should read like a **professional product performance report** — 
         data-driven, reflective, and actionable."""
 
+
 def make_performance_review_chain(llm):
     prompt = PromptTemplate(input_variables=["context"], template=performance_review_template)
     return prompt | llm
 
+
 def make_idea_chain(llm):
-    prompt = PromptTemplate(input_variables=["pain_points"], template=idea_template_single)
+    prompt = PromptTemplate(input_variables=["pain_points"], template=idea_multiple_single)
     return prompt | llm
 
-def choose_llm(use_json_mode: bool = True):
+def choose_llm(use_json_mode: bool = True, output_model: str = PainPointsOutput):
     """Try Ollama first; if fails, fallback to OpenAI
     
     Args:
@@ -342,6 +715,8 @@ def choose_llm(use_json_mode: bool = True):
     temperature = float(os.getenv("LLM_TEMPERATURE", "0.3"))
     # Increase max tokens to avoid truncation
     max_tokens = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+
+    
     
     if use_ollama:
         try:
@@ -361,7 +736,7 @@ def choose_llm(use_json_mode: bool = True):
             
             print(f"DEBUG: Connecting to Ollama with model {model_name}")
             
-            llm = ChatOllama(**llm_kwargs)
+            llm = ChatOllama(**llm_kwargs).with_structured_output(output_model)
             return llm
         except Exception as e:
             error_msg = str(e)
@@ -375,7 +750,8 @@ def choose_llm(use_json_mode: bool = True):
         model=model_name,
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         max_tokens=max_tokens
-    )
+    ).with_structured_output(AppIdeasOutput)
+
     return llm
 
 def validate_link(url: str) -> str:
@@ -485,6 +861,8 @@ def generate_reddit_report_structured(url: str) -> Dict[str, Any]:
             user_agent=os.getenv("REDDIT_USER_AGENT") or "app-idea-generator"
         )
         
+        use_json_mode = os.getenv("USE_JSON", "true").lower() in ("1", "true", "yes")
+
         # Test Reddit connection
         if not reddit.read_only:
             return {"error": "Error: Reddit API credentials not properly configured"}
@@ -494,10 +872,14 @@ def generate_reddit_report_structured(url: str) -> Dict[str, Any]:
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
 
-        llm = choose_llm(use_json_mode=False)  # Use text mode for formatted output
-        pain_chain = make_painpoint_chain(llm)
-        idea_chain = make_idea_chain(llm)
-        performance_chain = make_performance_review_chain(llm)
+        pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)  # Use text mode for formatted output
+        pain_chain = make_painpoint_chain(pain_llm)
+
+        idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeasOutput)
+        idea_chain = make_idea_chain(idea_llm)
+
+        performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)
+        performance_chain = make_performance_review_chain(performance_llm)
 
         # Invoke chains with error handling
         try:
@@ -549,78 +931,6 @@ def save_report(report: str, filename: str = "report.txt"):
 
 
 
-
-def parse_llm_painpoints(raw_text):
-    """
-    Converts LLM-formatted pain point bullets into a clean JSON structure.
-    Handles:
-      - Bold titles (e.g., **Title**)
-      - Multi-line quotes
-      - Implicit quotes
-      - Authors following "—"
-      - Multiple quotes per bullet section
-    Returns:
-      - JSON list of pain points with quotes, authors, and number of unique mentions
-    """
-    
-
-    pain_points = []
-
-    # Split on bullets
-    sections = re.split(r"^\s*•", raw_text, flags=re.MULTILINE)
-    sections = [s.strip() for s in sections if s.strip()]
-
-    for section in sections:
-
-        # Extract title inside ** **
-        title_match = re.search(r"\*\*(.*?)\*\*", section)
-        if not title_match:
-            continue
-
-        title = title_match.group(1).strip()
-
-        quotes_list = []
-
-        # Check for implicit pain point
-        if "Implicit" in section or "implicit" in section:
-            quotes_list.append({
-                "quote": "(Implicit, not explicitly quoted)",
-                "author": None
-            })
-            num_mentions = 0  # No user explicitly mentioned
-        else:
-            # Extract quotes (text inside quotes "...")
-            raw_quotes = re.findall(r'"(.*?)"', section, flags=re.DOTALL)
-
-            authors_seen = set()
-            for q in raw_quotes:
-                # Try to extract author for this specific quote
-                pattern = re.escape(f'"{q}"') + r'\s*—\s*([^\n]+)'
-                author_match = re.search(pattern, section)
-
-                author = author_match.group(1).strip() if author_match else None
-                if author:
-                    authors_seen.add(author)
-
-                quotes_list.append({
-                    "quote": q.strip(),
-                    "author": author
-                })
-
-            num_mentions = len(authors_seen)
-
-            # If no authors found, count as 1 mention per quote
-            if num_mentions == 0:
-                num_mentions = len(quotes_list)
-
-        pain_points.append({
-            "title": title,
-            "quotes": quotes_list,
-            "num_mentions": num_mentions
-        })
-
-    return pain_points
-
 # ========== FastAPI Application ==========
 
 app = FastAPI(title="Reporrt AI API", description="API for generating reports from Reddit threads")
@@ -652,6 +962,8 @@ async def generate_idea(url: str):
             user_agent=os.getenv("REDDIT_USER_AGENT") or "app-idea-generator"
         )
         
+        use_json_mode = os.getenv("USE_JSON", "true").lower() in ("1", "true", "yes")
+
         # Test Reddit connection
         if not reddit.read_only:
             return {"error": "Error: Reddit API credentials not properly configured"}
@@ -661,8 +973,14 @@ async def generate_idea(url: str):
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
 
-        llm = choose_llm(use_json_mode=False)  # Use text mode for formatted output
-        pain_chain = make_painpoint_chain(llm)
+        pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)  # Use text mode for formatted output
+        pain_chain = make_painpoint_chain(pain_llm)
+
+        idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeasOutput)
+        idea_chain = make_idea_chain(idea_llm)
+
+        #performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)
+        #performance_chain = make_performance_review_chain(performance_llm)
 
         # Invoke chains with error handling
         try:
@@ -674,14 +992,23 @@ async def generate_idea(url: str):
         except ValueError as e:
             return {"error": str(e)}
 
+        try:
+            idea_resp = _invoke_chain_safely(
+                idea_chain, 
+                {"pain_points": pain_resp}, 
+                fallback_key="app_idea"
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+
         return {
-            "pain_points": parse_llm_painpoints(pain_resp),
-            "painpoint_count": len(parse_llm_painpoints(pain_resp)),
+            "pain_points": pain_resp,
+            "idea_resp": idea_resp,
             "url": url
         }
     except Exception as e:
         # Log the error and return a safe error message
-        print(f"Error in generate_reddit_report_structured: {str(e)}")
+        print(f"Error in generate reddit idea: {str(e)}")
         return {"error": f"Error generating report: {str(e)}"}
 
 if __name__ == "__main__":
