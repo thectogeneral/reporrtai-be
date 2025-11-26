@@ -11,253 +11,15 @@ import praw
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from langchain_core.output_parsers import PydanticOutputParser
-from typing import List, Optional\
+from models.PainPointModel import PainPointOutput
+from models.AppIdeaModel import AppIdeaOutput
+from models.PerformanceReportModel import PerformanceReportOutput
+from models.SentimentModel import SentimentExtractionOutput
+from models.TopicModel import TopicOutput
 
 
-
-
-# ========== Pydantic Models for Structured Output ==========
-
-class Quote(BaseModel):
-    user: str = Field(description="The username of the user who expressed the pain point")
-    quote: str = Field(description="A short quote from the text, 1-2 sentences")
-
-class PainPoint(BaseModel):
-    title: str = Field(description="The title of the pain point")
-    number_of_users: int = Field(description="The number of unique users who expressed the pain point")
-    category: str = Field(description="The category of the pain point")
-    quote: List[Quote]
-
-
-# ─────────────────────────────────────────
-# USER JOURNEY + PAIN POINT MAPPING
-# ─────────────────────────────────────────
-
-class UserJourneyStep(BaseModel):
-    step: str = Field(description="The name of the step in the user journey")
-    touchpoint: str = Field(description="Where the user interacts at this step")
-    emotional_state: str = Field(description="How the user feels at this step")
-
-
-class Feature(BaseModel):
-    feature_name: str = Field(description="Name of the feature")
-    description: str = Field(description="Short explanation of what the feature does")
-    is_mvp_feature: bool = Field(description="Whether this feature is included in the MVP")
-
-
-class PainPointMapping(BaseModel):
-    feature_name: str = Field(description="The feature addressing pain points")
-    solves_pain_points: List[str] = Field(description="Pain points addressed by this feature")
-    value_created: str = Field(description="Description of the value produced by solving the pain points")
-
-
-# ─────────────────────────────────────────
-# COMPETITIVE LANDSCAPE
-# ─────────────────────────────────────────
-
-class Competitor(BaseModel):
-    name: str = Field(description="Competitor or similar product")
-    strengths: str = Field(description="What they do well")
-    weaknesses: str = Field(description="Where they fall short")
-    comparison_summary: str = Field(description="Summary of how the proposed app compares")
-
-
-class CompetitiveLandscape(BaseModel):
-    competitors: List[Competitor]
-    unique_differentiators: str = Field(description="Key elements that set this app apart")
-    market_gaps: str = Field(description="Gaps in the market the product will fill")
-
-
-# ─────────────────────────────────────────
-# ROADMAP STAGES
-# ─────────────────────────────────────────
-
-class RoadmapStage(BaseModel):
-    features: List[str] = Field(description="Features included in this stage")
-    goals: str = Field(description="Primary goals for this stage")
-    metrics: List[str] = Field(description="Key metrics used to measure success in this stage")
-
-
-class ProductRoadmap(BaseModel):
-    mvp: RoadmapStage
-    v1: RoadmapStage
-    v2: RoadmapStage
-    full_product: RoadmapStage
-
-
-# ─────────────────────────────────────────
-# INDUSTRY + USERS
-# ─────────────────────────────────────────
-
-class Industry(BaseModel):
-    sector: str = Field(description="Industry category the app belongs to")
-    problem_solved: str = Field(description="Description of the core problem the app solves")
-    target_audience: str = Field(description="The audience the product is for")
-    business_stage: str = Field(description="Idea stage, prototype, early-stage startup, etc.")
-
-
-class TargetUsers(BaseModel):
-    primary_users: str = Field(description="Main intended users")
-    secondary_users: str = Field(description="Secondary or optional users")
-    motivations: str = Field(description="What drives these users to adopt the product")
-    demographics_and_behavior: str = Field(description="Key traits, habits, or contexts of use")
-
-
-# ─────────────────────────────────────────
-# TECH + COMPLIANCE
-# ─────────────────────────────────────────
-
-class TechStack(BaseModel):
-    frontend: str
-    backend: str
-    database: str
-    mobile: Optional[str] = None
-    other: Optional[str] = None
-
-
-class CICDAndMonitoring(BaseModel):
-    pipeline: str = Field(description="CI/CD tools or processes in use")
-    monitoring_tools: str = Field(description="Tools used for error tracking and monitoring")
-
-
-class Compliance(BaseModel):
-    kyc_aml: bool = Field(description="Whether KYC/AML is required")
-    gdpr: bool = Field(description="Whether GDPR compliance is required")
-    data_privacy: str = Field(description="Notes on data privacy requirements")
-
-
-class TechnicalImplementation(BaseModel):
-    tech_stack: TechStack
-    architecture: str = Field(description="Monolith, microservices, serverless, etc.")
-    required_integrations: List[str] = Field(description="APIs or services required")
-    scalability_considerations: str = Field(description="How the system will scale")
-    deployment_environment: str = Field(description="AWS, GCP, Vercel, etc.")
-    cicd_and_monitoring: CICDAndMonitoring
-    compliance: Compliance
-
-
-# ─────────────────────────────────────────
-# BUSINESS MODEL
-# ─────────────────────────────────────────
-
-class MonetizationForecast(BaseModel):
-    user_volume: str = Field(description="Expected number of users")
-    pricing: str = Field(description="Pricing for the model")
-    projected_revenue: str = Field(description="MRR/ARR estimate or equivalent")
-
-
-class BusinessModel(BaseModel):
-    model_type: str = Field(description="SaaS, subscription, freemium, etc.")
-    pricing_strategy: str = Field(description="How the product will be priced")
-    customer_acquisition: str = Field(description="How new users will be acquired")
-    customer_retention: str = Field(description="How existing users will be retained")
-    monetization_forecast: MonetizationForecast
-
-
-class MonetizationStrategy(BaseModel):
-    strategy_name: str
-    description: str
-    ideal_stage: str = Field(description="Stage where this strategy is most appropriate: MVP, V1, scaling")
-
-
-# ─────────────────────────────────────────
-# GO-TO-MARKET + METRICS
-# ─────────────────────────────────────────
-
-class GoToMarket(BaseModel):
-    launch_sequence: List[str] = Field(description="Beta → launch → expansion steps")
-    growth_channels: List[str] = Field(description="Marketing or growth channels")
-    early_adopter_tactics: str = Field(description="Ways to attract first users")
-    community_building: str = Field(description="How to build a community around the app")
-    content_marketing_timeline: List[str] = Field(description="Content themes by week or month")
-
-
-class SuccessMetrics(BaseModel):
-    mvp: List[str]
-    v1: List[str]
-    v2: List[str]
-    overall_kpis: List[str]
-
-
-# ─────────────────────────────────────────
-# TEAM + LONG-TERM
-# ─────────────────────────────────────────
-
-class TeamRole(BaseModel):
-    role: str = Field(description="Name of the role")
-    responsibilities: str = Field(description="What this role is responsible for")
-
-
-class LongTermOpportunities(BaseModel):
-    feature_expansion: List[str]
-    integrations: List[str]
-    new_markets: List[str]
-    strategic_partnerships: List[str]
-    five_year_vision: str = Field(description="High-level view of where the app is going long-term")
-
-
-# ─────────────────────────────────────────
-# MVP SCOPE
-# ─────────────────────────────────────────
-
-class MVPScope(BaseModel):
-    core_value: str = Field(description="Smallest version that provides meaningful value")
-    included_workflows: List[str] = Field(description="User journeys included in MVP")
-    unique_selling_point: str = Field(description="USP of the MVP")
-    growth_potential: str = Field(description="Potential for expansion")
-    market_size_estimate: str = Field(description="Market TAM/SAM/SOM or a rough estimate")
-    excluded_from_mvp: List[str] = Field(description="What is intentionally not included")
-
-class ExtractedPainPoint(BaseModel):
-    title: str
-    number_of_users: int
-    category: str
-    quotes: List[str]
-# ─────────────────────────────────────────
-# MAIN APP MODEL
-# ─────────────────────────────────────────
-
-class PainPointsOutput(BaseModel): 
-    pain_points: List[PainPoint]
-    number_of_pain_points: int
-
-class ChallengesAndRisks(BaseModel):
-    risks: List[str] = Field(description="List of major risks")
-    mitigation: List[str] = Field(description="How to mitigate each risk")
-    competitor_lessons: str = Field(description="Insights from competitor failures or weaknesses")
-
-class AppIdea(BaseModel):
-    app_name: str
-    one_sentence_description: str
-    problem_summary: str
-    value_proposition: str
-    vision: str
-    industry: Industry
-    target_users: TargetUsers
-    competitive_landscape: CompetitiveLandscape
-    core_features: List[Feature]
-    pain_point_mapping: List[PainPointMapping]
-    mvp_scope: MVPScope
-    product_roadmap: ProductRoadmap
-    user_experience: List[UserJourneyStep]
-    technical_implementation: TechnicalImplementation
-    business_model: BusinessModel
-    monetization_strategies: List[MonetizationStrategy]
-    go_to_market_strategy: GoToMarket
-    success_metrics: SuccessMetrics
-    challenges_and_risks: ChallengesAndRisks
-    team_and_skills: List[TeamRole]
-    long_term_opportunities: LongTermOpportunities
-
-class AppIdeasOutput(BaseModel):
-    app_ideas: List[AppIdea]
-
-    class Config:
-        extra = "ignore"
 
 # ========== Reddit Fetching ==========
 
@@ -305,172 +67,6 @@ def fetch_reddit_thread(reddit, url: str, limit_comments: int = 100) -> str:
 
 
 # ========== LLM Chains for Extraction & Idea ==========
-
-def make_painpoint_chain(llm):
-    """Create a chain for pain points extraction with formatted output"""
-    # Enhanced prompt with clear instructions for formatted text output
-    prompt = PromptTemplate(
-        template="""You are an expert product analyst. Analyze the conversation/thread text below and extract the main user pain points, then produce a comprehensive product strategy. Follow the rules EXACTLY.
-
-            CRITICAL EXTRACTION RULES:
-            1. Extract only real and meaningful pain points from the actual text.
-            2. For EACH pain point include:
-                - title
-                - number_of_users
-                - category
-                - quotes (array of quotes)
-            3. Quotes must be copied EXACTLY — no paraphrasing.
-            4. Include username attribution when available.
-            5. If multiple users mention the same issue, include multiple quotes.
-            6. If the pain point is implied (not quoted), use: "quote": "Implicit, not explicitly quoted".
-            7. You MUST return at least 3 pain points. If the text has fewer than 3, merge smaller related issues into distinct categories.
-            8. After extraction, propose 3–5 app ideas that directly address these issues.
-            9. Then generate a complete product vision strategy following all sections defined below.
-            10. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
-
-            
-            Thread text:
-            {thread_text}
-            
-
-            Now extract the pain points from the above text, following the rules above.""",
-            input_variables=["thread_text"]
-        )
-    
-    # Simple chain - no JSON format needed for formatted text output
-    #parser = PydanticOutputParser(pydantic_object=AppIdeasOutput)
-    chain = prompt | llm
-    return chain
-
-# Prompt for idea generation (multiple ideas with structured data)
-idea_template_single2 = """You are an innovative product strategist and system designer. 
-        Given these pain points:
-        {pain_points}
-
-        Propose **3-5** app ideas or digital solutions that address these issues. For each idea, provide:
-
-        1. **Tagline**: A catchy one-line tagline (max 15 words)
-        2. **Problem**: What specific problem(s) does this solution solve? (2-3 sentences)
-        3. **Product Description**: A clear description of what the product is and how it works (3-5 sentences)
-        4. **Full Detail Report**: A comprehensive product roadmap covering:
-        - Product Overview (name, description, value proposition)
-        - Industry and target audience
-        - Core features (3-7 features)
-        - MVP scope
-        - Business model
-        - Go-to-market strategy
-        - Technical implementation overview
-
-        Format your response as readable text with clear sections and formatting. Use markdown formatting for headers, bullet points, and emphasis."""
-
-# Prompt for single idea generation (for backward compatibility)
-idea_multiple_single2 = """You are an innovative product strategist and system designer. 
-        Given these pain points:
-        {pain_points}
-
-        Propose **3-5** app ideas app idea or digital solution (name it) that directly addresses these issues. 
-        Then provide a **comprehensive and actionable product roadmap** covering the following:
-
-        1. **Product Overview**
-        - App Name
-        - One-sentence description of what the solution/product/business/app is
-        - Problem Summary
-        - **Value Proposition Summary:** State clearly how the solution stands out from competitors and what makes it unique or indispensable.
-        - Vision and long-term goal
-
-        2. **Industry**
-        - What industry is the app in?
-        - What is the problem that the app solves?
-        - What is the target audience?
-        - What is the business stage?
-
-        3. **Target Users**
-        - Who are the primary and secondary users?
-        - What motivates them?
-        - Key demographics and behavioral traits
-
-        4. **Competitive Landscape**
-        - Compare the proposed solution to 2–3 existing competitors using a short table or summary.
-        - Highlight unique differentiators and market gaps.
-
-        5. **Core Features (3–7)**
-        - List and explain each feature.
-        - Indicate which features belong in the MVP vs. later versions.
-
-        6. **How It Solves the Pain Points**
-        - Clearly map each feature to one or more pain points.
-        - Show how these connections create tangible user value.
-
-        7. **MVP (Minimum Viable Product) Scope**
-        - What is the smallest version that delivers value?
-        - Core workflows or user journeys included.
-        - What is the unique selling point (USP) of the app?
-        - What is the potential for the app to grow?
-        - What is the potential market size?
-        - What’s intentionally left out at the MVP stage?
-
-        8. **Product Roadmap (MVP → V1 → V2 → Full Product)**
-        - Describe how the product evolves across 3–4 stages.
-        - Mention features, scalability goals, and potential integrations per stage.
-        - Include **metrics by phase** (e.g., MVP: early retention; V1: engagement growth; V2: revenue scale).
-
-        9. **User Experience & Design Considerations**
-        - **Core user flow:** Step-by-step journey (e.g., onboarding → first transaction → feedback loop).
-        - **Onboarding experience:** How users are guided and educated.
-        - **Retention or engagement loop:** Notifications, gamification, or habit-forming mechanisms.
-        - Include a short **user journey map** that captures key touchpoints and emotional states.
-
-        10. **Technical Implementation Overview**
-            - Recommended tech stack (frontend, backend, database, etc.)
-            - Architecture choice (monolith, microservices, or serverless)
-            - APIs or integrations needed
-            - Scalability and performance considerations
-            - Deployment environment (e.g., AWS, GCP, Vercel)
-            - CI/CD pipeline and monitoring stack (e.g., GitHub Actions, Sentry, Datadog)
-            - Include **compliance considerations** such as KYC/AML, GDPR, or data privacy requirements.
-
-        11. **Business Model**
-            - Overall business model type (e.g., subscription, SaaS, freemium, transaction-based)
-            - Pricing strategy
-            - Customer acquisition and retention model
-            - Include a **basic monetization forecast** (example: user volume × pricing = projected MRR or ARR)
-
-        12. **Possible Monetization Strategies**
-            - List 3–5 monetization options or revenue streams.
-            - Include both short-term and long-term opportunities.
-            - Examples: freemium plans, in-app purchases, B2B licensing, API usage fees, ads, affiliate marketing, data insights, white-label options, partnerships.
-            - Identify which monetization strategies best fit the MVP stage vs. later scaling stages.
-
-        13. **Go-To-Market Strategy**
-            - Launch sequence (beta → public launch → expansion)
-            - Growth channels (organic, paid, partnerships, influencer, community)
-            - Early adopter acquisition tactics
-            - Community-building and brand positioning plans
-            - Include a brief **content and marketing timeline** (e.g., weekly or monthly themes for launch period)
-
-        14. **Success Metrics**
-            - KPIs to track post-launch (user growth, engagement, retention, conversion, churn, and revenue)
-            - Break down KPIs per phase (MVP, V1, V2) for clarity.
-
-        15. **Challenges & Risks**
-            - Technical, operational, market, or regulatory risks
-            - Mitigation strategies and fallback options
-            - Include a short “lessons from competitors” insight, if applicable.
-
-        16. **Team & Skills Required**
-            - Outline key roles needed for MVP and scaling stages (e.g., Product Manager, Full-Stack Engineer, UI/UX Designer, Security Engineer, Marketing Lead)
-            - Briefly state responsibilities per role.
-
-        17. **Long-Term Opportunities**
-            - Potential expansions (features, integrations, new markets)
-            - Strategic partnerships or ecosystem opportunities
-            - Future roadmap for scaling globally
-            - End with a **5-Year Vision:** Describe what the app could evolve into — e.g., an intelligent platform, a marketplace, or a full ecosystem.
-
-        Your response should read like a **founder’s detailed product vision document** — 
-        clear, strategic, investor-ready, and comprehensive enough for a startup team to use 
-        as a step-by-step roadmap from MVP to a fully launched and monetized product."""
-
 idea_multiple_single = """You are an innovative product strategist and system designer. 
         Given these pain points:
         {pain_points}
@@ -494,139 +90,14 @@ idea_multiple_single = """You are an innovative product strategist and system de
             16. Team & Skills Required
             17. Long-Term Opportunities & 5-Year Vision
 
-            You must fill every section. If information is missing, make reasonable assumptions.
-
-            FINAL OUTPUT FORMAT (MANDATORY EXACT JSON STRUCTURE):
-
-            {{
-            "pain_points": [
-                {{
-                "title": "",
-                "number_of_users": 0,
-                "category": "",
-                "quotes": [
-                    {{
-                    "user": "",
-                    "quote": ""
-                    }}
-                ]
-                }}
-            ],
-            "number_of_pain_points": 0,
-            "app_ideas": [
-                {{
-                "app_name": "",
-                "one_sentence_description": "",
-                "problem_summary": "",
-                "value_proposition_summary": "",
-                "vision": "",
-                "industry": {{
-                    "industry_name": "",
-                    "problem_solved": "",
-                    "target_audience": "",
-                    "business_stage": ""
-                }},
-                "target_users": {{
-                    "primary_users": "",
-                    "secondary_users": "",
-                    "motivations": "",
-                    "demographics": "",
-                    "behaviors": ""
-                }},
-                "competitive_landscape": [
-                    {{
-                    "competitor_name": "",
-                    "comparison_summary": ""
-                    }}
-                ],
-                "core_features": {{
-                    "mvp": [],
-                    "v1_plus": []
-                }},
-                "pain_point_mapping": [
-                    {{
-                    "feature": "",
-                    "addresses_pain_points": []
-                    }}
-                ],
-                "mvp_scope": {{
-                    "core_workflows": [],
-                    "usp": "",
-                    "market_potential": "",
-                    "intentionally_excluded": []
-                }},
-                "product_roadmap": {{
-                    "mvp": "",
-                    "v1": "",
-                    "v2": "",
-                    "full_product": ""
-                }},
-                "ux_design": {{
-                    "core_user_flow": "",
-                    "onboarding": "",
-                    "engagement_loop": "",
-                    "user_journey_map": ""
-                }},
-                "technical_implementation": {{
-                    "frontend": "",
-                    "backend": "",
-                    "database": "",
-                    "architecture": "",
-                    "integrations": [],
-                    "scalability": "",
-                    "deployment": "",
-                    "cicd": "",
-                    "compliance": ""
-                }},
-                "business_model": {{
-                    "model_type": "",
-                    "pricing": "",
-                    "acquisition_strategy": "",
-                    "forecast": ""
-                }},
-                "monetization_strategies": [],
-                "go_to_market": {{
-                    "launch_sequence": "",
-                    "growth_channels": "",
-                    "early_adopter_strategy": "",
-                    "marketing_timeline": ""
-                }},
-                "success_metrics": {{
-                    "mvp": [],
-                    "v1": [],
-                    "v2": []
-                }},
-                "challenges_risks": {{
-                    "risks": [],
-                    "mitigation": [],
-                    "competitor_lessons": ""
-                }},
-                "team": [
-                    {{
-                    "role": "",
-                    "responsibility": ""
-                    }}
-                ],
-                "long_term_opportunities": {{
-                    "expansions": [],
-                    "partnerships": [],
-                    "global_scale_opportunity": "",
-                    "five_year_vision": ""
-                }}
-                }}
-            ]
-            }}"""
-
-
-
-# ========== Main Flow ==========
+            You must fill every section. If information is missing, make reasonable assumptions."""
 
 performance_review_template = """You are a strategic product analyst and business reviewer. 
         Given this context:
-        {context}
+        {thread_text}
 
-        Generate a **comprehensive performance report** on the product or company, focusing on results, lessons, and future directions.
-
+        Generate a comprehensive performance report on the product or company, focusing on results, lessons, and future directions. Your response must fill every section. If information is missing, make reasonable and realistic assumptions,
+        
         Your report should cover the following sections:
 
         1. **Executive Summary**
@@ -690,12 +161,93 @@ performance_review_template = """You are a strategic product analyst and busines
             - Summary of momentum and outlook
             - Strategic recommendations for next phase
 
-        Your response should read like a **professional product performance report** — 
-        data-driven, reflective, and actionable."""
+        You must fill every section. If information is missing, make reasonable assumptions.
+        Your response should read like a **professional product performance report** — data-driven, reflective, and actionable."""
 
+
+sentiment_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract all *relevant user sentiments*. Follow the rules EXACTLY.
+
+        CRITICAL RULES:
+        1. Extract only meaningful sentiments directly expressed in the text.
+        2. For EACH sentiment include:
+            - user (the username of the user who wrote the quote)
+            - sentiment (one of: "positive", "negative", "neutral")
+            - quote (MUST be copied EXACTLY from the thread — no paraphrasing)
+            - brief_reason (1 short sentence explaining why this quote fits the sentiment)
+        3. Quotes must be copied EXACTLY — no paraphrasing.
+        4. Do NOT merge quotes — each unique user quote should become its own sentiment item.
+        5. Include username attribution when available.
+        6. If the sentiment is implied but not explicitly stated, set:
+            "quote": "Implicit, not explicitly quoted"
+        7. Minimum of 3 sentiments. If the thread has fewer, break down comments into smaller sentiment expressions.
+        8. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
+
+        Thread text:
+        {thread_text}
+        """
+
+
+painpoint_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract the main user pain points, then produce a comprehensive product strategy. Follow the rules EXACTLY.
+
+            CRITICAL EXTRACTION RULES:
+            1. Extract only real and meaningful pain points from the actual text.
+            2. For EACH pain point include:
+                - title
+                - number_of_users
+                - category
+                - quotes (array of quotes)
+            3. Quotes must be copied EXACTLY — no paraphrasing.
+            4. Include username attribution when available.
+            5. If multiple users mention the same issue, include multiple quotes.
+            6. If the pain point is implied (not quoted), use: "quote": "Implicit, not explicitly quoted".
+            7. You MUST return at least 3 pain points. If the text has fewer than 3, merge smaller related issues into distinct categories.
+            8. After extraction, propose 1(one) app ideas that directly address these issues.
+            9. Then generate a complete product vision strategy following all sections defined below.
+            10. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
+
+            
+            Thread text:
+            {thread_text}
+            """
+
+topic_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract all *relevant topics* discussed. Follow the rules EXACTLY.
+
+        CRITICAL RULES:
+        1. Extract only meaningful topics that are directly discussed or implied in the text.
+        2. For EACH topic include:
+            - topic (a concise, descriptive label of the topic)
+            - subtopics (if applicable, a list of related subtopics or aspects discussed under this topic; otherwise an empty list)
+            - brief_reason (1 short sentence explaining why this topic is relevant in the thread)
+        3. Do NOT combine separate topics into one.
+        4. If a topic is implied but not explicitly stated, set:
+            "topic": "Implicit, not explicitly mentioned"
+        5. Include at least 3 topics. If the thread has fewer, break down discussions into smaller topic elements.
+        6. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
+
+        Thread text:
+        {thread_text}
+        """
+
+
+# ========== Main Flow ==========
+
+
+def make_sentiment_chain(llm):
+    prompt = PromptTemplate(input_variables=["thread_text"], template=sentiment_template)
+    return prompt | llm
+
+
+def make_painpoint_chain(llm):
+    prompt = PromptTemplate(input_variables=["thread_text"], template=painpoint_template)
+    return prompt | llm
+
+
+def make_topic_chain(llm):
+    prompt = PromptTemplate(input_variables=["thread_text"], template=topic_template)
+    return prompt | llm
 
 def make_performance_review_chain(llm):
-    prompt = PromptTemplate(input_variables=["context"], template=performance_review_template)
+    prompt = PromptTemplate(input_variables=["thread_text"], template=performance_review_template)
     return prompt | llm
 
 
@@ -703,7 +255,7 @@ def make_idea_chain(llm):
     prompt = PromptTemplate(input_variables=["pain_points"], template=idea_multiple_single)
     return prompt | llm
 
-def choose_llm(use_json_mode: bool = True, output_model: str = PainPointsOutput):
+def choose_llm(use_json_mode: bool = True, output_model: str = PainPointOutput):
     """Try Ollama first; if fails, fallback to OpenAI
     
     Args:
@@ -750,7 +302,7 @@ def choose_llm(use_json_mode: bool = True, output_model: str = PainPointsOutput)
         model=model_name,
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         max_tokens=max_tokens
-    ).with_structured_output(AppIdeasOutput)
+    ).with_structured_output(output_model)
 
     return llm
 
@@ -787,6 +339,8 @@ def generate_reddit_report(url: str) -> str:
     report.append("\n\n=== App Idea & Solution ===\n")
     report.append(result["app_idea"].strip())
     return "\n".join(report)
+
+
 
 # ========== Helper Functions for Chain Invocation ==========
 
@@ -872,13 +426,13 @@ def generate_reddit_report_structured(url: str) -> Dict[str, Any]:
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
 
-        pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)  # Use text mode for formatted output
+        pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointOutput)  # Use text mode for formatted output
         pain_chain = make_painpoint_chain(pain_llm)
 
-        idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeasOutput)
+        idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
         idea_chain = make_idea_chain(idea_llm)
 
-        performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)
+        performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PerformanceReportOutput)
         performance_chain = make_performance_review_chain(performance_llm)
 
         # Invoke chains with error handling
@@ -903,7 +457,7 @@ def generate_reddit_report_structured(url: str) -> Dict[str, Any]:
         try:
             performance_resp = _invoke_chain_safely(
                 performance_chain, 
-                {"context": thread_text}, 
+                {"thread_text": thread_text}, 
                 fallback_key="performance_report"
             )
         except ValueError as e:
@@ -973,14 +527,11 @@ async def generate_idea(url: str):
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
 
-        pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)  # Use text mode for formatted output
+        pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointOutput)  # Use text mode for formatted output
         pain_chain = make_painpoint_chain(pain_llm)
 
-        idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeasOutput)
+        idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
         idea_chain = make_idea_chain(idea_llm)
-
-        #performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointsOutput)
-        #performance_chain = make_performance_review_chain(performance_llm)
 
         # Invoke chains with error handling
         try:
@@ -1009,6 +560,74 @@ async def generate_idea(url: str):
     except Exception as e:
         # Log the error and return a safe error message
         print(f"Error in generate reddit idea: {str(e)}")
+        return {"error": f"Error generating report: {str(e)}"}
+
+@app.get("/api/v1/performance")
+async def generate_performance_report(url: str):
+    try:
+        # Initialize Reddit client with error handling
+        reddit = praw.Reddit(
+            client_id=os.getenv("REDDIT_CLIENT_ID"),
+            client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+            user_agent=os.getenv("REDDIT_USER_AGENT") or "app-idea-generator"
+        )
+        
+        use_json_mode = os.getenv("USE_JSON", "true").lower() in ("1", "true", "yes")
+
+        # Test Reddit connection
+        if not reddit.read_only:
+            return {"error": "Error: Reddit API credentials not properly configured"}
+        
+        thread_text = fetch_reddit_thread(reddit, url)
+        
+        if not thread_text or len(thread_text.strip()) < 10:
+            return {"error": "Error: Could not fetch thread content or thread is empty"}
+            
+        performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PerformanceReportOutput)
+        performance_chain = make_performance_review_chain(performance_llm)
+
+        sentiment_llm = choose_llm(use_json_mode=use_json_mode, output_model=SentimentExtractionOutput)
+        sentiment_chain = make_sentiment_chain(sentiment_llm)
+
+        topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=TopicOutput)
+        topic_chain = make_topic_chain(topic_llm)
+
+        try:
+            topic_resp = _invoke_chain_safely(
+                topic_chain, 
+                {"thread_text": thread_text}, 
+                fallback_key="topics"
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+
+        try:
+            sentiment_resp = _invoke_chain_safely(
+                sentiment_chain, 
+                {"thread_text": thread_text}, 
+                fallback_key="sentiments"
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+
+        # Invoke chains with error handling
+        try:
+            performance_resp = _invoke_chain_safely(
+                performance_chain, 
+                {"thread_text": thread_text}, 
+                fallback_key="performance_report"
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+        return {
+            "performance_review": performance_resp,
+            "sentiments": sentiment_resp,
+            "topics": topic_resp,
+            "url": url
+        }
+    except Exception as e:
+        # Log the error and return a safe error message
+        print(f"Error in generate generating performance report: {str(e)}")
         return {"error": f"Error generating report: {str(e)}"}
 
 if __name__ == "__main__":
