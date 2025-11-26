@@ -199,3 +199,104 @@ performance_review_template2 = """You are a strategic product analyst and busine
 
         Your response should read like a **professional product performance report** — data-driven, reflective, and actionable."""
 
+
+
+
+
+
+
+
+performance_review_template = """You are a strategic product analyst and business reviewer. 
+        Given this context:
+        {thread_text}
+
+        Generate a comprehensive performance report on the product or company, focusing on results, lessons, and future directions. Your response must fill every section. If information is missing, make reasonable and realistic assumptions,
+        
+        Your report should cover the following sections:
+
+        1. **Executive Summary**
+        - Brief overview of the product or company
+        - Key goals or KPIs initially set
+        - Short summary of the overall performance (successes and challenges)
+
+        2. **Customer Insights & Pain Points**
+        - What user pain points were identified at launch?
+        - How effectively were they solved?
+        - What new pain points or unmet needs have emerged?
+        - Include user feedback highlights or sentiment trends.
+
+        3. **Product Performance**
+        - What worked well (features, user experience, engagement)?
+        - What didn’t work or underperformed (features, design choices, functionality)?
+        - Adoption metrics, engagement data, or usage trends.
+
+        4. **Business & Market Performance**
+        - Revenue performance vs. projections
+        - Customer acquisition and retention analysis
+        - Market share and competitive positioning
+
+        5. **Operational Review**
+        - Internal execution and workflow effectiveness
+        - Bottlenecks or inefficiencies
+        - Team culture and alignment
+
+        6. **Marketing & Growth Review**
+        - Performance of marketing and acquisition channels
+        - Conversion funnel analysis
+        - Brand perception and community engagement
+
+        7. **Technology & Infrastructure Review**
+        - Stability, uptime, scalability
+        - Key bugs, performance bottlenecks, or technical debt
+        - Architecture or tech-stack lessons learned
+
+        8. **Financial Overview**
+        - Revenue and cost breakdown
+        - Profitability trends and key financial metrics
+
+        9. **Lessons Learned**
+        - Key wins, mistakes, and insights
+        - Assumptions that proved right or wrong
+
+        10. **Strategic Adjustments & Next Steps**
+            - Planned improvements and pivots
+            - Areas to deprioritize or sunset
+
+        11. **Future Roadmap**
+            - Short-term (3–6 months): Key fixes or goals
+            - Mid-term (6–12 months): Growth and optimization
+            - Long-term (1–3 years): Vision and scaling goals
+
+        12. **Risks & Mitigation**
+            - Key forward risks
+            - Mitigation strategies
+
+        13. **Conclusion**
+            - Summary of momentum and outlook
+            - Strategic recommendations for next phase
+
+        You must fill every section. If information is missing, make reasonable assumptions.
+        Your response should read like a **professional product performance report** — data-driven, reflective, and actionable."""
+
+
+sentiment_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract all *relevant user sentiments*. Follow the rules EXACTLY.
+
+        CRITICAL RULES:
+        SENTIMENT EXTRACTION RULES:
+        1. Extract only meaningful sentiments directly expressed in the text.
+        2. For EACH sentiment include:
+            - user (the username of the user who wrote the quote)
+            - sentiment (one of: "positive", "negative", "neutral")
+            - quote (MUST be copied EXACTLY from the thread — no paraphrasing)
+            - brief_reason (1 short sentence explaining why this quote fits the sentiment)
+        3. Quotes must be copied EXACTLY — no paraphrasing.
+        4. Do NOT merge quotes — each unique user quote should become its own sentiment item.
+        5. Include username attribution when available.
+        6. If the sentiment is implied but not explicitly stated, set:
+            "quote": "Implicit, not explicitly quoted"
+        7. Minimum of 3 sentiments. If the thread has fewer, break down comments into smaller sentiment expressions.
+        8. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
+
+        Thread text:
+        {thread_text}
+        """

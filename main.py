@@ -1,6 +1,7 @@
 import os, json
 from dotenv import load_dotenv
 import re
+import asyncio
 
 
 # This will search for a .env file in the current directory or parent directories
@@ -43,7 +44,7 @@ def parse_reddit_url(url: str) -> Dict[str, str]:
         raise ValueError("URL not in expected format")
     return {"subreddit": subreddit, "post_id": post_id}
 
-def fetch_reddit_thread(reddit, url: str, limit_comments: int = 100) -> str:
+def fetch_reddit_thread(reddit, url: str, limit_comments: int = 30) -> str:
     """
     Returns a full text (post + some comments) as one big string.
     """
@@ -69,7 +70,9 @@ def fetch_reddit_thread(reddit, url: str, limit_comments: int = 100) -> str:
     return "\n".join(texts)
 
 
+
 # ========== LLM Chains for Extraction & Idea ==========
+
 idea_multiple_single = """You are an innovative product strategist and system designer. 
         Given these pain points:
         {pain_points}
@@ -107,12 +110,55 @@ idea_topic_template = """You are an innovative product strategist and system des
         Generate 3-5 unique, actionable app ideas that directly address the given pain points. Each idea should be conceptually distinct from all others.
 
         PRODUCT STRATEGY SECTIONS TO GENERATE FOR EACH APP IDEA:
-        1. App Name
-        2. Tagline
-        3. Description
-        4. Pain Points Solved
+            1. App Name
+            2. Tagline
+            3. Description
+            4. Pain Points Solved
 
         You must fill every section. If information is missing, make reasonable assumptions.
+        """
+
+painpoint_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract the main user pain points, then produce a comprehensive product strategy. Follow the rules EXACTLY.
+
+            CRITICAL EXTRACTION RULES:
+                1. Extract only real and meaningful pain points from the actual text.
+                2. For EACH pain point include:
+                    - title
+                    - number_of_users
+                    - category
+                    - quotes (array of quotes)
+                3. Quotes must be copied EXACTLY — no paraphrasing.
+                4. Include username attribution when available.
+                5. If multiple users mention the same issue, include multiple quotes.
+                6. If the pain point is implied (not quoted), use: "quote": "Implicit, not explicitly quoted".
+                7. You MUST return at least 3 pain points. If the text has fewer than 3, merge smaller related issues into distinct categories.
+                8. After extraction, propose 1(one) app ideas that directly address these issues.
+                9. Then generate a complete product vision strategy following all sections defined below.
+                10. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
+
+            
+            Thread text:
+            {thread_text}
+            """
+
+
+
+topic_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract all *relevant topics* discussed. Follow the rules EXACTLY.
+
+        TOPIC EXTRACTION RULES:
+            1. Extract only meaningful topics that are directly discussed or implied in the text.
+            2. For EACH topic include:
+                - topic (a concise, descriptive label of the topic)
+                - subtopics (if applicable, a list of related subtopics or aspects discussed under this topic; otherwise an empty list)
+                - brief_reason (1 short sentence explaining why this topic is relevant in the thread)
+            3. Do NOT combine separate topics into one.
+            4. If a topic is implied but not explicitly stated, set:
+                "topic": "Implicit, not explicitly mentioned"
+            5. Include at least 3 topics. If the thread has fewer, break down discussions into smaller topic elements.
+            6. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
+
+        Thread text:
+        {thread_text}
         """
 
 
@@ -120,136 +166,49 @@ performance_review_template = """You are a strategic product analyst and busines
         Given this context:
         {thread_text}
 
-        Generate a comprehensive performance report on the product or company, focusing on results, lessons, and future directions. Your response must fill every section. If information is missing, make reasonable and realistic assumptions,
-        
-        Your report should cover the following sections:
-
-        1. **Executive Summary**
-        - Brief overview of the product or company
-        - Key goals or KPIs initially set
-        - Short summary of the overall performance (successes and challenges)
-
-        2. **Customer Insights & Pain Points**
-        - What user pain points were identified at launch?
-        - How effectively were they solved?
-        - What new pain points or unmet needs have emerged?
-        - Include user feedback highlights or sentiment trends.
-
-        3. **Product Performance**
-        - What worked well (features, user experience, engagement)?
-        - What didn’t work or underperformed (features, design choices, functionality)?
-        - Adoption metrics, engagement data, or usage trends.
-
-        4. **Business & Market Performance**
-        - Revenue performance vs. projections
-        - Customer acquisition and retention analysis
-        - Market share and competitive positioning
-
-        5. **Operational Review**
-        - Internal execution and workflow effectiveness
-        - Bottlenecks or inefficiencies
-        - Team culture and alignment
-
-        6. **Marketing & Growth Review**
-        - Performance of marketing and acquisition channels
-        - Conversion funnel analysis
-        - Brand perception and community engagement
-
-        7. **Technology & Infrastructure Review**
-        - Stability, uptime, scalability
-        - Key bugs, performance bottlenecks, or technical debt
-        - Architecture or tech-stack lessons learned
-
-        8. **Financial Overview**
-        - Revenue and cost breakdown
-        - Profitability trends and key financial metrics
-
-        9. **Lessons Learned**
-        - Key wins, mistakes, and insights
-        - Assumptions that proved right or wrong
-
-        10. **Strategic Adjustments & Next Steps**
-            - Planned improvements and pivots
-            - Areas to deprioritize or sunset
-
-        11. **Future Roadmap**
-            - Short-term (3–6 months): Key fixes or goals
-            - Mid-term (6–12 months): Growth and optimization
-            - Long-term (1–3 years): Vision and scaling goals
-
-        12. **Risks & Mitigation**
-            - Key forward risks
-            - Mitigation strategies
-
-        13. **Conclusion**
-            - Summary of momentum and outlook
-            - Strategic recommendations for next phase
-
         You must fill every section. If information is missing, make reasonable assumptions.
-        Your response should read like a **professional product performance report** — data-driven, reflective, and actionable."""
+        Your response should read like a **professional product performance report** — data-driven, reflective, and actionable.
+
+        
+        PERFORMANCE REPORT SECTIONS TO GENERATE:
+            1. Executive Summary
+            2. Customer Insights & Pain Points
+            3. Product Performance
+            4. Business & Market Performance
+            5. Operational Review
+            6. Marketing & Growth Review
+            7. Technology & Infrastructure Review
+            8. Financial Overview
+            9. Lessons Learned
+            10. Strategic Adjustments & Next Steps
+            11. Future Roadmap
+            12. Risks & Mitigation
+            13. Conclusion
+        """
 
 
 sentiment_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract all *relevant user sentiments*. Follow the rules EXACTLY.
 
-        CRITICAL RULES:
-        1. Extract only meaningful sentiments directly expressed in the text.
-        2. For EACH sentiment include:
-            - user (the username of the user who wrote the quote)
-            - sentiment (one of: "positive", "negative", "neutral")
-            - quote (MUST be copied EXACTLY from the thread — no paraphrasing)
-            - brief_reason (1 short sentence explaining why this quote fits the sentiment)
-        3. Quotes must be copied EXACTLY — no paraphrasing.
-        4. Do NOT merge quotes — each unique user quote should become its own sentiment item.
-        5. Include username attribution when available.
-        6. If the sentiment is implied but not explicitly stated, set:
-            "quote": "Implicit, not explicitly quoted"
-        7. Minimum of 3 sentiments. If the thread has fewer, break down comments into smaller sentiment expressions.
-        8. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
-
-        Thread text:
-        {thread_text}
-        """
-
-painpoint_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract the main user pain points, then produce a comprehensive product strategy. Follow the rules EXACTLY.
-
-            CRITICAL EXTRACTION RULES:
-            1. Extract only real and meaningful pain points from the actual text.
-            2. For EACH pain point include:
-                - title
-                - number_of_users
-                - category
-                - quotes (array of quotes)
+        SENTIMENT EXTRACTION RULES:
+            1. Extract only meaningful sentiments directly expressed in the text.
+            2. For EACH sentiment include:
+                - user (the username of the user who wrote the quote)
+                - sentiment (one of: "positive", "negative", "neutral")
+                - quote (MUST be copied EXACTLY from the thread — no paraphrasing)
+                - brief_reason (1 short sentence explaining why this quote fits the sentiment)
             3. Quotes must be copied EXACTLY — no paraphrasing.
-            4. Include username attribution when available.
-            5. If multiple users mention the same issue, include multiple quotes.
-            6. If the pain point is implied (not quoted), use: "quote": "Implicit, not explicitly quoted".
-            7. You MUST return at least 3 pain points. If the text has fewer than 3, merge smaller related issues into distinct categories.
-            8. After extraction, propose 1(one) app ideas that directly address these issues.
-            9. Then generate a complete product vision strategy following all sections defined below.
-            10. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
-
-            
-            Thread text:
-            {thread_text}
-            """
-
-topic_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract all *relevant topics* discussed. Follow the rules EXACTLY.
-
-        CRITICAL RULES:
-        1. Extract only meaningful topics that are directly discussed or implied in the text.
-        2. For EACH topic include:
-            - topic (a concise, descriptive label of the topic)
-            - subtopics (if applicable, a list of related subtopics or aspects discussed under this topic; otherwise an empty list)
-            - brief_reason (1 short sentence explaining why this topic is relevant in the thread)
-        3. Do NOT combine separate topics into one.
-        4. If a topic is implied but not explicitly stated, set:
-            "topic": "Implicit, not explicitly mentioned"
-        5. Include at least 3 topics. If the thread has fewer, break down discussions into smaller topic elements.
-        6. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
+            4. Do NOT merge quotes — each unique user quote should become its own sentiment item.
+            5. Include username attribution when available.
+            6. If the sentiment is implied but not explicitly stated, set:
+                "quote": "Implicit, not explicitly quoted"
+            7. Minimum of 3 sentiments. If the thread has fewer, break down comments into smaller sentiment expressions.
+            8. The ENTIRE output MUST be valid JSON. No markdown, no commentary.
 
         Thread text:
         {thread_text}
         """
+
+
 
 
 # ========== Main Flow ==========
@@ -516,35 +475,19 @@ def save_report(report: str, filename: str = "report.txt"):
 
 
 
-
-import json
-from typing import Union
-
-def pretty_json(response_str: str) -> Union[str, None]:
-    """
-    Convert a raw JSON string (with escaped characters) into
-    pretty-printed, readable JSON.
-
-    Args:
-        response_str (str): The raw JSON string.
-
-    Returns:
-        str: Pretty-printed JSON string, or None if invalid.
-    """
-    try:
-        # Convert string to Python dict/list
-        response_dict = json.loads(response_str)
-        # Return pretty-printed JSON
-        return json.dumps(response_dict, indent=2)
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON: {e}")
-        return None
-
-
-
 # ========== FastAPI Application ==========
 
 app = FastAPI(title="Reporrt AI API", description="API for generating reports from Reddit threads")
+
+
+# Global chains reused across requests
+performance_chain_global = None
+sentiment_chain_global = None
+topic_chain_global = None
+pain_chain_global = None
+idea_chain_global = None
+idea_topic_chain_global = None
+
 
 # Add CORS middleware to allow frontend to call the API
 app.add_middleware(
@@ -554,6 +497,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def init_llm_chains():
+    global performance_chain_global, sentiment_chain_global, topic_chain_global
+    global pain_chain_global, idea_chain_global, idea_topic_chain_global
+
+    use_json_mode = os.getenv("USE_JSON", "true").lower() in ("1", "true", "yes")
+
+    # Create each LLM only once
+    performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PerformanceReportOutput)
+    sentiment_llm = choose_llm(use_json_mode=use_json_mode, output_model=SentimentExtractionOutput)
+    topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=TopicOutput)
+    pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointOutput)
+    idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
+    idea_topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=IdeaTopicOutput)
+
+    # And their chains
+    performance_chain_global = make_performance_review_chain(performance_llm)
+    sentiment_chain_global = make_sentiment_chain(sentiment_llm)
+    topic_chain_global = make_topic_chain(topic_llm)
+    pain_chain_global = make_painpoint_chain(pain_llm)
+    idea_chain_global = make_idea_chain(idea_llm)
+    idea_topic_chain_global = make_idea_topic_chain(idea_topic_llm)
 
 @app.get("/")
 async def root():
@@ -566,6 +533,8 @@ async def health():
 @app.get("/api/v1/idea")
 async def generate_idea(url: str):
     try:
+        global pain_chain_global, idea_chain_global, idea_topic_chain_global
+
         # Initialize Reddit client with error handling
         reddit = praw.Reddit(
             client_id=os.getenv("REDDIT_CLIENT_ID"),
@@ -579,55 +548,56 @@ async def generate_idea(url: str):
         if not reddit.read_only:
             return {"error": "Error: Reddit API credentials not properly configured"}
         
-        thread_text = fetch_reddit_thread(reddit, url)
+        # Run blocking Reddit fetch in a thread so it doesn't block the event loop
+        thread_text = await asyncio.to_thread(fetch_reddit_thread, reddit, url)
         
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
 
-        pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointOutput)  # Use text mode for formatted output
-        pain_chain = make_painpoint_chain(pain_llm)
+        # Safety fallback: if startup failed for some reason, init lazily
+        if not all([pain_chain_global, idea_chain_global, idea_topic_chain_global]):
+            pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointOutput)
+            idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
+            idea_topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=IdeaTopicOutput)
+            pain_chain_global = make_painpoint_chain(pain_llm)
+            idea_chain_global = make_idea_chain(idea_llm)
+            idea_topic_chain_global = make_idea_topic_chain(idea_topic_llm)
 
-        #idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
-        #idea_chain = make_idea_chain(idea_llm)
-
-        idea_topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=IdeaTopicOutput)
-        idea_topic_chain = make_idea_topic_chain(idea_topic_llm)
-
-       
-
-        # Invoke chains with error handling
+        # First get pain points
         try:
-            pain_resp = _invoke_chain_safely(
-                pain_chain, 
-                {"thread_text": thread_text}, 
-                fallback_key="pain_points"
+            pain_resp = await asyncio.to_thread(
+                _invoke_chain_safely,
+                pain_chain_global,
+                {"thread_text": thread_text},
+                "pain_points",
             )
         except ValueError as e:
             return {"error": str(e)}
 
+        # Then derive idea + idea_topic in parallel from the same pain points
         try:
-            idea_topic_resp = _invoke_chain_safely(
-                idea_topic_chain, 
-                {"pain_points": pain_resp, "thread_text": thread_text}, 
-                fallback_key="product_ideas"
+            idea_topic_resp, idea_resp = await asyncio.gather(
+                asyncio.to_thread(
+                    _invoke_chain_safely,
+                    idea_topic_chain_global,
+                    {"pain_points": pain_resp, "thread_text": thread_text},
+                    "product_ideas",
+                ),
+                asyncio.to_thread(
+                    _invoke_chain_safely,
+                    idea_chain_global,
+                    {"pain_points": pain_resp},
+                    "app_idea",
+                ),
             )
         except ValueError as e:
             return {"error": str(e)}
-
-        #try:
-            #idea_resp = _invoke_chain_safely(
-                #idea_chain, 
-                #{"pain_points": pain_resp}, 
-                #fallback_key="app_idea"
-            #)
-        #except ValueError as e:
-            #return {"error": str(e)}
 
         return {
-            #"pain_points": pain_resp,
-            #"idea_resp": idea_resp,
+            "pain_points": pain_resp,
+            "idea_resp": idea_resp,
             "idea_topic_resp": idea_topic_resp,
-            #"url": url
+            "url": url
         }
     except Exception as e:
         # Log the error and return a safe error message
@@ -637,57 +607,53 @@ async def generate_idea(url: str):
 @app.get("/api/v1/performance")
 async def generate_performance_report(url: str):
     try:
-        # Initialize Reddit client with error handling
+        global performance_chain_global, sentiment_chain_global, topic_chain_global
+
         reddit = praw.Reddit(
             client_id=os.getenv("REDDIT_CLIENT_ID"),
             client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-            user_agent=os.getenv("REDDIT_USER_AGENT") or "app-idea-generator"
+            user_agent=os.getenv("REDDIT_USER_AGENT") or "app-idea-generator",
         )
-        
-        use_json_mode = os.getenv("USE_JSON", "true").lower() in ("1", "true", "yes")
 
-        # Test Reddit connection
         if not reddit.read_only:
             return {"error": "Error: Reddit API credentials not properly configured"}
-        
-        thread_text = fetch_reddit_thread(reddit, url)
-        
+
+        thread_text = await asyncio.to_thread(fetch_reddit_thread, reddit, url)
+
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
-            
-        performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PerformanceReportOutput)
-        performance_chain = make_performance_review_chain(performance_llm)
 
-        sentiment_llm = choose_llm(use_json_mode=use_json_mode, output_model=SentimentExtractionOutput)
-        sentiment_chain = make_sentiment_chain(sentiment_llm)
+        # Safety fallback: if startup failed for some reason, init lazily
+        if not all([performance_chain_global, sentiment_chain_global, topic_chain_global]):
+            use_json_mode = os.getenv("USE_JSON", "true").lower() in ("1", "true", "yes")
+            performance_llm = choose_llm(use_json_mode=use_json_mode, output_model=PerformanceReportOutput)
+            sentiment_llm = choose_llm(use_json_mode=use_json_mode, output_model=SentimentExtractionOutput)
+            topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=TopicOutput)
+            performance_chain_global = make_performance_review_chain(performance_llm)
+            sentiment_chain_global = make_sentiment_chain(sentiment_llm)
+            topic_chain_global = make_topic_chain(topic_llm)
 
-        topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=TopicOutput)
-        topic_chain = make_topic_chain(topic_llm)
-
+        # Use the shared chains (still invoked concurrently, as you already do)
         try:
-            topic_resp = _invoke_chain_safely(
-                topic_chain, 
-                {"thread_text": thread_text}, 
-                fallback_key="topics"
-            )
-        except ValueError as e:
-            return {"error": str(e)}
-
-        try:
-            sentiment_resp = _invoke_chain_safely(
-                sentiment_chain, 
-                {"thread_text": thread_text}, 
-                fallback_key="sentiments"
-            )
-        except ValueError as e:
-            return {"error": str(e)}
-
-        # Invoke chains with error handling
-        try:
-            performance_resp = _invoke_chain_safely(
-                performance_chain, 
-                {"thread_text": thread_text}, 
-                fallback_key="performance_report"
+            topic_resp, sentiment_resp, performance_resp = await asyncio.gather(
+                asyncio.to_thread(
+                    _invoke_chain_safely,
+                    topic_chain_global,
+                    {"thread_text": thread_text},
+                    "topics",
+                ),
+                asyncio.to_thread(
+                    _invoke_chain_safely,
+                    sentiment_chain_global,
+                    {"thread_text": thread_text},
+                    "sentiments",
+                ),
+                asyncio.to_thread(
+                    _invoke_chain_safely,
+                    performance_chain_global,
+                    {"thread_text": thread_text},
+                    "performance_report",
+                ),
             )
         except ValueError as e:
             return {"error": str(e)}
@@ -696,10 +662,9 @@ async def generate_performance_report(url: str):
             "performance_review": performance_resp,
             "sentiments": sentiment_resp,
             "topics": topic_resp,
-            "url": url
+            "url": url,
         }
     except Exception as e:
-        # Log the error and return a safe error message
         print(f"Error in generate generating performance report: {str(e)}")
         return {"error": f"Error generating report: {str(e)}"}
 
