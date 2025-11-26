@@ -18,6 +18,7 @@ from models.AppIdeaModel import AppIdeaOutput
 from models.PerformanceReportModel import PerformanceReportOutput
 from models.SentimentModel import SentimentExtractionOutput
 from models.TopicModel import TopicOutput
+from models.IdeaTopicModel import IdeaTopicOutput
 
 
 
@@ -91,6 +92,34 @@ idea_multiple_single = """You are an innovative product strategist and system de
             17. Long-Term Opportunities & 5-Year Vision
 
             You must fill every section. If information is missing, make reasonable assumptions."""
+
+idea_topic_template = """You are an expert product analyst. Your task is to analyze the given conversation/thread and a list of pain points, then generate **unique, actionable product ideas**. Each idea should solve one or more pain points, but each idea must be conceptually distinct from all others.
+
+        Given these pain points:
+        {pain_points}
+
+        CRITICAL EXTRACTION RULES:
+        1. Extract only product ideas that directly address one or more of the given pain points.
+        2. Each product idea must be **unique** and not just a minor variation of another idea.
+        3. Do NOT invent ideas unrelated to the given pain points.
+        4. Merge any ideas that are conceptually the same; do not produce duplicates.
+        5. Each product idea must include:
+        - a clear and unique product name,
+        - a concise tagline (1 sentence),
+        - a practical description (2–4 sentences),
+        - a list of pain points it solves under “pain_points_solved”.
+        6. Avoid generating multiple ideas that differ only by pricing, branding, or small feature tweaks.
+        7. Ideas may overlap on some pain points, but each must propose a **different solution or approach**.
+        8. Aim to cover a variety of pain points with distinct ideas rather than repeating the same pain point with the same approach.
+        9. Ignore any irrelevant, off-topic, or opinion statements in the thread.
+    
+        - Do NOT include any explanations, comments, or extra text outside the JSON.
+        - Ensure every product idea is unique in concept and clearly actionable.
+
+        Thread text:
+        {thread_text}
+        """
+
 
 performance_review_template = """You are a strategic product analyst and business reviewer. 
         Given this context:
@@ -239,6 +268,11 @@ def make_sentiment_chain(llm):
 
 def make_painpoint_chain(llm):
     prompt = PromptTemplate(input_variables=["thread_text"], template=painpoint_template)
+    return prompt | llm
+
+
+def make_idea_topic_chain(llm):
+    prompt = PromptTemplate(input_variables=["thread_text", "pain_points"], template=idea_topic_template)
     return prompt | llm
 
 
@@ -533,12 +567,26 @@ async def generate_idea(url: str):
         idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
         idea_chain = make_idea_chain(idea_llm)
 
+        idea_topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=IdeaTopicOutput)
+        idea_topic_chain = make_idea_topic_chain(idea_topic_llm)
+
+       
+
         # Invoke chains with error handling
         try:
             pain_resp = _invoke_chain_safely(
                 pain_chain, 
                 {"thread_text": thread_text}, 
                 fallback_key="pain_points"
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+
+        try:
+            idea_topic_resp = _invoke_chain_safely(
+                idea_topic_chain, 
+                {"pain_points": pain_resp, "thread_text": thread_text}, 
+                fallback_key="product_ideas"
             )
         except ValueError as e:
             return {"error": str(e)}
@@ -555,6 +603,7 @@ async def generate_idea(url: str):
         return {
             "pain_points": pain_resp,
             "idea_resp": idea_resp,
+            "idea_topic_resp": idea_topic_resp,
             "url": url
         }
     except Exception as e:
