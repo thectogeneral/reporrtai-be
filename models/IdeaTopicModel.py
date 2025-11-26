@@ -19,3 +19,6 @@ class IdeaTopicOutput(BaseModel):
     product_ideas: List[ProductIdea] = Field(
         description="List of product ideas generated from the conversation and pain points."
     )
+
+    class Config:
+        extra = "ignore"

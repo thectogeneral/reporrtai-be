@@ -24,3 +24,6 @@ class SentimentExtractionOutput(BaseModel):
     number_of_sentiments: int = Field(
         description="The number of sentiments extracted from the thread"
     )
+
+    class Config:
+        extra = "ignore"

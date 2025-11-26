@@ -79,16 +79,19 @@ class Conclusion(BaseModel):
 
 
 class PerformanceReportOutput(BaseModel):
-    executive_summary: ExecutiveSummary
-    customer_insights_and_pain_points: CustomerInsightsAndPainPoints
-    product_performance: ProductPerformance
-    business_and_market_performance: BusinessAndMarketPerformance
-    operational_review: OperationalReview
-    marketing_and_growth_review: MarketingAndGrowthReview
-    technology_and_infrastructure_review: TechnologyAndInfrastructureReview
-    financial_overview: FinancialOverview
-    lessons_learned: LessonsLearned
-    strategic_adjustments_and_next_steps: StrategicAdjustmentsAndNextSteps
-    future_roadmap: FutureRoadmap
-    risks_and_mitigation: RisksAndMitigation
-    conclusion: Conclusion
+    executive_summary: ExecutiveSummary = Field(description="Executive summary of the performance report")
+    customer_insights_and_pain_points: CustomerInsightsAndPainPoints = Field(description="Customer insights and pain points")
+    product_performance: ProductPerformance = Field(description="Product performance")
+    business_and_market_performance: BusinessAndMarketPerformance = Field(description="Business and market performance")
+    operational_review: OperationalReview = Field(description="Operational review")
+    marketing_and_growth_review: MarketingAndGrowthReview = Field(description="Marketing and growth review")
+    technology_and_infrastructure_review: TechnologyAndInfrastructureReview = Field(description="Technology and infrastructure review")
+    financial_overview: FinancialOverview = Field(description="Financial overview")
+    lessons_learned: LessonsLearned = Field(description="Lessons learned")
+    strategic_adjustments_and_next_steps: StrategicAdjustmentsAndNextSteps = Field(description="Strategic adjustments and next steps")
+    future_roadmap: FutureRoadmap = Field(description="Future roadmap")
+    risks_and_mitigation: RisksAndMitigation = Field(description="Risks and mitigation")
+    conclusion: Conclusion = Field(description="Conclusion")
+
+    class Config:
+        extra = "ignore"

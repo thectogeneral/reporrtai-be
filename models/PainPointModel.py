@@ -17,3 +17,6 @@ class PainPoint(BaseModel):
 class PainPointOutput(BaseModel): 
     pain_points: List[PainPoint]
     number_of_pain_points: int
+
+    class Config:
+        extra = "ignore"

@@ -9,3 +9,7 @@ class Topic(BaseModel):
 class TopicOutput(BaseModel):
     topics: List[Topic] = Field(..., description="List of all relevant topics extracted from the thread")
     number_of_topics: int = Field(..., description="The number of topics extracted from the thread")
+
+    class Config:
+        extra = "ignore"
+

@@ -220,7 +220,7 @@ class AppIdea(BaseModel):
     long_term_opportunities: LongTermOpportunities
 
 class AppIdeaOutput(BaseModel):
-    app_ideas: List[AppIdea]
+    app_ideas: List[AppIdea] = Field(description="List of app ideas")
 
     class Config:
         extra = "ignore"

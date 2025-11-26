@@ -2,6 +2,7 @@ import os, json
 from dotenv import load_dotenv
 import re
 
+
 # This will search for a .env file in the current directory or parent directories
 load_dotenv()
 
@@ -13,6 +14,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from models.PainPointModel import PainPointOutput
 from models.AppIdeaModel import AppIdeaOutput
 from models.PerformanceReportModel import PerformanceReportOutput
@@ -93,31 +95,24 @@ idea_multiple_single = """You are an innovative product strategist and system de
 
             You must fill every section. If information is missing, make reasonable assumptions."""
 
-idea_topic_template = """You are an expert product analyst. Your task is to analyze the given conversation/thread and a list of pain points, then generate **unique, actionable product ideas**. Each idea should solve one or more pain points, but each idea must be conceptually distinct from all others.
-
-        Given these pain points:
-        {pain_points}
-
-        CRITICAL EXTRACTION RULES:
-        1. Extract only product ideas that directly address one or more of the given pain points.
-        2. Each product idea must be **unique** and not just a minor variation of another idea.
-        3. Do NOT invent ideas unrelated to the given pain points.
-        4. Merge any ideas that are conceptually the same; do not produce duplicates.
-        5. Each product idea must include:
-        - a clear and unique product name,
-        - a concise tagline (1 sentence),
-        - a practical description (2–4 sentences),
-        - a list of pain points it solves under “pain_points_solved”.
-        6. Avoid generating multiple ideas that differ only by pricing, branding, or small feature tweaks.
-        7. Ideas may overlap on some pain points, but each must propose a **different solution or approach**.
-        8. Aim to cover a variety of pain points with distinct ideas rather than repeating the same pain point with the same approach.
-        9. Ignore any irrelevant, off-topic, or opinion statements in the thread.
-    
-        - Do NOT include any explanations, comments, or extra text outside the JSON.
-        - Ensure every product idea is unique in concept and clearly actionable.
+idea_topic_template = """You are an innovative product strategist and system designer. 
+        Given this context:
 
         Thread text:
         {thread_text}
+
+        Pain points:
+        {pain_points}
+
+        Generate 3-5 unique, actionable app ideas that directly address the given pain points. Each idea should be conceptually distinct from all others.
+
+        PRODUCT STRATEGY SECTIONS TO GENERATE FOR EACH APP IDEA:
+        1. App Name
+        2. Tagline
+        3. Description
+        4. Pain Points Solved
+
+        You must fill every section. If information is missing, make reasonable assumptions.
         """
 
 
@@ -214,7 +209,6 @@ sentiment_template = """You are an expert product analyst. Analyze the conversat
         Thread text:
         {thread_text}
         """
-
 
 painpoint_template = """You are an expert product analyst. Analyze the conversation/thread text below and extract the main user pain points, then produce a comprehensive product strategy. Follow the rules EXACTLY.
 
@@ -422,13 +416,16 @@ def _handle_ollama_403_error(error: Exception) -> Optional[Dict[str, str]]:
         Error type: {error_type}"""
     return {"error": error_details.strip()}
 
-def _invoke_chain_safely(chain, input_data: Dict[str, str], fallback_key: str = "") -> str:
+def _invoke_chain_safely(chain, input_data: Dict[str, str], fallback_key: str = "") -> Any:
     """
-    Safely invoke a chain and extract the response content.
-    Handles 403 errors specifically and re-raises other exceptions.
+    Safely invoke a chain. Returns the structured Pydantic object if available,
+    otherwise falls back to string extraction.
     """
     try:
         result = chain.invoke(input_data)
+        # If result is Pydantic model, return it directly
+        if isinstance(result, BaseModel):
+            return result
         return _extract_chain_response(result, fallback_key)
     except Exception as e:
         error_response = _handle_ollama_403_error(e)
@@ -519,6 +516,32 @@ def save_report(report: str, filename: str = "report.txt"):
 
 
 
+
+import json
+from typing import Union
+
+def pretty_json(response_str: str) -> Union[str, None]:
+    """
+    Convert a raw JSON string (with escaped characters) into
+    pretty-printed, readable JSON.
+
+    Args:
+        response_str (str): The raw JSON string.
+
+    Returns:
+        str: Pretty-printed JSON string, or None if invalid.
+    """
+    try:
+        # Convert string to Python dict/list
+        response_dict = json.loads(response_str)
+        # Return pretty-printed JSON
+        return json.dumps(response_dict, indent=2)
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON: {e}")
+        return None
+
+
+
 # ========== FastAPI Application ==========
 
 app = FastAPI(title="Reporrt AI API", description="API for generating reports from Reddit threads")
@@ -564,8 +587,8 @@ async def generate_idea(url: str):
         pain_llm = choose_llm(use_json_mode=use_json_mode, output_model=PainPointOutput)  # Use text mode for formatted output
         pain_chain = make_painpoint_chain(pain_llm)
 
-        idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
-        idea_chain = make_idea_chain(idea_llm)
+        #idea_llm = choose_llm(use_json_mode=use_json_mode, output_model=AppIdeaOutput)
+        #idea_chain = make_idea_chain(idea_llm)
 
         idea_topic_llm = choose_llm(use_json_mode=use_json_mode, output_model=IdeaTopicOutput)
         idea_topic_chain = make_idea_topic_chain(idea_topic_llm)
@@ -591,20 +614,20 @@ async def generate_idea(url: str):
         except ValueError as e:
             return {"error": str(e)}
 
-        try:
-            idea_resp = _invoke_chain_safely(
-                idea_chain, 
-                {"pain_points": pain_resp}, 
-                fallback_key="app_idea"
-            )
-        except ValueError as e:
-            return {"error": str(e)}
+        #try:
+            #idea_resp = _invoke_chain_safely(
+                #idea_chain, 
+                #{"pain_points": pain_resp}, 
+                #fallback_key="app_idea"
+            #)
+        #except ValueError as e:
+            #return {"error": str(e)}
 
         return {
-            "pain_points": pain_resp,
-            "idea_resp": idea_resp,
+            #"pain_points": pain_resp,
+            #"idea_resp": idea_resp,
             "idea_topic_resp": idea_topic_resp,
-            "url": url
+            #"url": url
         }
     except Exception as e:
         # Log the error and return a safe error message
@@ -668,6 +691,7 @@ async def generate_performance_report(url: str):
             )
         except ValueError as e:
             return {"error": str(e)}
+
         return {
             "performance_review": performance_resp,
             "sentiments": sentiment_resp,
@@ -734,6 +758,8 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Unexpected error: {str(e)}")
             print("Please check your input and try again")
+
+
 
 
 
