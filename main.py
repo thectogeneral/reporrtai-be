@@ -488,6 +488,22 @@ pain_chain_global = None
 idea_chain_global = None
 idea_topic_chain_global = None
 
+# In-memory progress tracking for long-running requests
+progress_store: Dict[str, Dict[str, Any]] = {}
+
+
+def _set_progress(request_id: Optional[str], progress: int, status: str) -> None:
+    """
+    Update progress percentage and status text for a given request_id.
+    Safe to call from within the main async context; not used inside worker threads.
+    """
+    if not request_id:
+        return
+    progress_store[request_id] = {
+        "progress": max(0, min(100, progress)),
+        "status": status,
+    }
+
 
 # Add CORS middleware to allow frontend to call the API
 app.add_middleware(
@@ -530,10 +546,34 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
-@app.get("/api/v1/idea")
-async def generate_idea(url: str):
+@app.post("/api/v1/idea")
+async def generate_idea(url: str, request_id: Optional[str] = None):
+    return await generate_idea(url, request_id)
+
+@app.post("/api/v1/performance")
+async def generate_performance_report(url: str, request_id: Optional[str] = None):
+    return await generate_performance_report(url, request_id)
+
+@app.get("/api/v1/progress")
+async def get_progress(request_id: str):
+    """
+    Poll current progress of a long-running request.
+    Frontend should:
+      1) Generate a request_id (e.g. UUID)
+      2) Pass it to /idea or /performance
+      3) Poll this endpoint with the same request_id
+    """
+    data = progress_store.get(request_id)
+    if not data:
+        return {"request_id": request_id, "progress": 0, "status": "unknown"}
+    return {"request_id": request_id, **data}
+
+
+async def generate_idea(url: str, request_id: Optional[str] = None):
     try:
         global pain_chain_global, idea_chain_global, idea_topic_chain_global
+
+        _set_progress(request_id, 0, "starting")
 
         # Initialize Reddit client with error handling
         reddit = praw.Reddit(
@@ -550,6 +590,7 @@ async def generate_idea(url: str):
         
         # Run blocking Reddit fetch in a thread so it doesn't block the event loop
         thread_text = await asyncio.to_thread(fetch_reddit_thread, reddit, url)
+        _set_progress(request_id, 20, "fetched thread content")
         
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
@@ -573,6 +614,7 @@ async def generate_idea(url: str):
             )
         except ValueError as e:
             return {"error": str(e)}
+        _set_progress(request_id, 50, "generated pain points")
 
         # Then derive idea + idea_topic in parallel from the same pain points
         try:
@@ -583,6 +625,9 @@ async def generate_idea(url: str):
                     {"pain_points": pain_resp, "thread_text": thread_text},
                     "product_ideas",
                 ),
+
+                _set_progress(request_id, 75, "generated idea topics"),
+
                 asyncio.to_thread(
                     _invoke_chain_safely,
                     idea_chain_global,
@@ -593,21 +638,25 @@ async def generate_idea(url: str):
         except ValueError as e:
             return {"error": str(e)}
 
+        _set_progress(request_id, 95, "assembled ideas")
+
         return {
             "pain_points": pain_resp,
             "idea_resp": idea_resp,
             "idea_topic_resp": idea_topic_resp,
-            "url": url
+            "url": url,
+            "request_id": request_id,
         }
     except Exception as e:
         # Log the error and return a safe error message
         print(f"Error in generate reddit idea: {str(e)}")
         return {"error": f"Error generating report: {str(e)}"}
 
-@app.get("/api/v1/performance")
-async def generate_performance_report(url: str):
+async def generate_performance_report(url: str, request_id: Optional[str] = None):
     try:
         global performance_chain_global, sentiment_chain_global, topic_chain_global
+
+        _set_progress(request_id, 0, "starting")
 
         reddit = praw.Reddit(
             client_id=os.getenv("REDDIT_CLIENT_ID"),
@@ -619,6 +668,7 @@ async def generate_performance_report(url: str):
             return {"error": "Error: Reddit API credentials not properly configured"}
 
         thread_text = await asyncio.to_thread(fetch_reddit_thread, reddit, url)
+        _set_progress(request_id, 20, "fetched thread content")
 
         if not thread_text or len(thread_text.strip()) < 10:
             return {"error": "Error: Could not fetch thread content or thread is empty"}
@@ -658,11 +708,14 @@ async def generate_performance_report(url: str):
         except ValueError as e:
             return {"error": str(e)}
 
+        _set_progress(request_id, 95, "completed analysis")
+
         return {
             "performance_review": performance_resp,
             "sentiments": sentiment_resp,
             "topics": topic_resp,
             "url": url,
+            "request_id": request_id,
         }
     except Exception as e:
         print(f"Error in generate generating performance report: {str(e)}")
