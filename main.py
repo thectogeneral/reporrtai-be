@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 import re
 import asyncio
 
+from datetime import datetime, timedelta
+import uuid
 
 # This will search for a .env file in the current directory or parent directories
 load_dotenv()
@@ -13,16 +15,103 @@ import praw
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+import jwt
+from passlib.context import CryptContext
 from models.PainPointModel import PainPointOutput
 from models.AppIdeaModel import AppIdeaOutput
 from models.PerformanceReportModel import PerformanceReportOutput
 from models.SentimentModel import SentimentExtractionOutput
 from models.TopicModel import TopicOutput
 from models.IdeaTopicModel import IdeaTopicOutput
+from models.UserModel import (
+    UserSignupRequest,
+    UserLoginRequest,
+    UserResponse,
+    TokenResponse,
+    User
+)
 
+
+# ========== JWT Configuration ==========
+
+# Secret key for JWT encoding/decoding - CHANGE THIS IN PRODUCTION!
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-key-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
+
+# Password hashing configuration
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# HTTP Bearer token security
+security = HTTPBearer()
+
+# In-memory user storage (replace with database in production)
+users_db: Dict[str, User] = {}
+
+
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt"""
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def create_access_token(user_id: str, email: str) -> str:
+    """Create a JWT access token"""
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS),
+        "iat": datetime.utcnow()
+    }
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> Dict[str, Any]:
+    """Decode and verify a JWT access token"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+    """Dependency to get the current authenticated user from JWT token"""
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    user_id = payload.get("sub")
+    
+    if user_id not in users_db:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+    
+    return users_db[user_id]
+
+
+def get_user_by_email(email: str) -> Optional[User]:
+    """Find a user by email address"""
+    for user in users_db.values():
+        if user.email == email:
+            return user
+    return None
 
 
 # ========== Reddit Fetching ==========
@@ -545,6 +634,118 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+# ========== Authentication Endpoints ==========
+
+@app.post("/api/v1/auth/signup", response_model=TokenResponse)
+async def signup(request: UserSignupRequest):
+    """
+    Register a new user account.
+    
+    - **name**: User's full name
+    - **email**: User's email address (must be unique)
+    - **password**: Password (minimum 8 characters)
+    - **confirm_password**: Must match password
+    """
+    # Check if passwords match
+    if request.password != request.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match"
+        )
+    
+    # Check if email already exists
+    if get_user_by_email(request.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
+    user_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    
+    new_user = User(
+        id=user_id,
+        name=request.name,
+        email=request.email,
+        password_hash=hash_password(request.password),
+        created_at=now
+    )
+    
+    # Store user in database
+    users_db[user_id] = new_user
+    
+    # Generate access token
+    access_token = create_access_token(user_id, request.email)
+    
+    # Return token and user info
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=UserResponse(
+            id=user_id,
+            name=new_user.name,
+            email=new_user.email,
+            created_at=now
+        )
+    )
+
+
+@app.post("/api/v1/auth/login", response_model=TokenResponse)
+async def login(request: UserLoginRequest):
+    """
+    Authenticate a user and return an access token.
+    
+    - **email**: User's email address
+    - **password**: User's password
+    """
+    # Find user by email
+    user = get_user_by_email(request.email)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+    
+    # Verify password
+    if not verify_password(request.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+    
+    # Generate access token
+    access_token = create_access_token(user.id, user.email)
+    
+    # Return token and user info
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=UserResponse(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            created_at=user.created_at
+        )
+    )
+
+
+@app.get("/api/v1/auth/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """
+    Get the current authenticated user's information.
+    Requires a valid JWT token in the Authorization header.
+    """
+    return UserResponse(
+        id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        created_at=current_user.created_at
+    )
+
 
 @app.post("/api/v1/idea")
 async def generate_idea(url: str, request_id: Optional[str] = None):
