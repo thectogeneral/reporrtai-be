@@ -213,21 +213,17 @@ sentiment_template = """You are an expert product analyst. Analyze the conversat
 
 # ========== Main Flow ==========
 
-
 def make_sentiment_chain(llm):
     prompt = PromptTemplate(input_variables=["thread_text"], template=sentiment_template)
     return prompt | llm
-
 
 def make_painpoint_chain(llm):
     prompt = PromptTemplate(input_variables=["thread_text"], template=painpoint_template)
     return prompt | llm
 
-
 def make_idea_topic_chain(llm):
     prompt = PromptTemplate(input_variables=["thread_text", "pain_points"], template=idea_topic_template)
     return prompt | llm
-
 
 def make_topic_chain(llm):
     prompt = PromptTemplate(input_variables=["thread_text"], template=topic_template)
@@ -326,6 +322,8 @@ def generate_reddit_report(url: str) -> str:
     report.append("\n\n=== App Idea & Solution ===\n")
     report.append(result["app_idea"].strip())
     return "\n".join(report)
+
+
 
 
 
@@ -475,6 +473,8 @@ def save_report(report: str, filename: str = "report.txt"):
 
 
 
+
+
 # ========== FastAPI Application ==========
 
 app = FastAPI(title="Reporrt AI API", description="API for generating reports from Reddit threads")
@@ -567,7 +567,6 @@ async def get_progress(request_id: str):
     if not data:
         return {"request_id": request_id, "progress": 0, "status": "unknown"}
     return {"request_id": request_id, **data}
-
 
 async def generate_idea(url: str, request_id: Optional[str] = None):
     try:
@@ -720,6 +719,7 @@ async def generate_performance_report(url: str, request_id: Optional[str] = None
     except Exception as e:
         print(f"Error in generate generating performance report: {str(e)}")
         return {"error": f"Error generating report: {str(e)}"}
+
 
 if __name__ == "__main__":
     import sys
