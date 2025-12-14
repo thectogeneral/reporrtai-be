@@ -34,6 +34,10 @@ from models.UserModel import (
     TokenResponse,
     User
 )
+from models.UserDBModel import UserDB
+from database import get_db, init_db, close_db, async_session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 
 # ========== JWT Configuration ==========
@@ -48,9 +52,6 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # HTTP Bearer token security
 security = HTTPBearer()
-
-# In-memory user storage (replace with database in production)
-users_db: Dict[str, User] = {}
 
 
 def hash_password(password: str) -> str:
@@ -91,27 +92,31 @@ def decode_access_token(token: str) -> Dict[str, Any]:
         )
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db)
+) -> UserDB:
     """Dependency to get the current authenticated user from JWT token"""
     token = credentials.credentials
     payload = decode_access_token(token)
     user_id = payload.get("sub")
     
-    if user_id not in users_db:
+    result = await db.execute(select(UserDB).where(UserDB.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
     
-    return users_db[user_id]
+    return user
 
 
-def get_user_by_email(email: str) -> Optional[User]:
+async def get_user_by_email(db: AsyncSession, email: str) -> Optional[UserDB]:
     """Find a user by email address"""
-    for user in users_db.values():
-        if user.email == email:
-            return user
-    return None
+    result = await db.execute(select(UserDB).where(UserDB.email == email))
+    return result.scalar_one_or_none()
 
 
 # ========== Reddit Fetching ==========
@@ -605,9 +610,14 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-async def init_llm_chains():
+async def startup():
     global performance_chain_global, sentiment_chain_global, topic_chain_global
     global pain_chain_global, idea_chain_global, idea_topic_chain_global
+
+    # Initialize database tables
+    print("Initializing database...")
+    await init_db()
+    print("Database initialized successfully")
 
     use_json_mode = os.getenv("USE_JSON", "true").lower() in ("1", "true", "yes")
 
@@ -627,6 +637,14 @@ async def init_llm_chains():
     idea_chain_global = make_idea_chain(idea_llm)
     idea_topic_chain_global = make_idea_topic_chain(idea_topic_llm)
 
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Close database connections on shutdown"""
+    print("Closing database connections...")
+    await close_db()
+    print("Database connections closed")
+
 @app.get("/")
 async def root():
     return {"message": "Reporrt AI API", "version": "1.0.0"}
@@ -639,7 +657,7 @@ async def health():
 # ========== Authentication Endpoints ==========
 
 @app.post("/api/v1/auth/signup", response_model=TokenResponse)
-async def signup(request: UserSignupRequest):
+async def signup(request: UserSignupRequest, db: AsyncSession = Depends(get_db)):
     """
     Register a new user account.
     
@@ -656,18 +674,17 @@ async def signup(request: UserSignupRequest):
         )
     
     # Check if email already exists
-    if get_user_by_email(request.email):
+    existing_user = await get_user_by_email(db, request.email)
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
     
     # Create new user
-    user_id = str(uuid.uuid4())
     now = datetime.utcnow()
     
-    new_user = User(
-        id=user_id,
+    new_user = UserDB(
         name=request.name,
         email=request.email,
         password_hash=hash_password(request.password),
@@ -675,26 +692,28 @@ async def signup(request: UserSignupRequest):
     )
     
     # Store user in database
-    users_db[user_id] = new_user
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
     
     # Generate access token
-    access_token = create_access_token(user_id, request.email)
+    access_token = create_access_token(str(new_user.id), request.email)
     
     # Return token and user info
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
         user=UserResponse(
-            id=user_id,
+            id=str(new_user.id),
             name=new_user.name,
             email=new_user.email,
-            created_at=now
+            created_at=new_user.created_at
         )
     )
 
 
 @app.post("/api/v1/auth/login", response_model=TokenResponse)
-async def login(request: UserLoginRequest):
+async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_db)):
     """
     Authenticate a user and return an access token.
     
@@ -702,7 +721,7 @@ async def login(request: UserLoginRequest):
     - **password**: User's password
     """
     # Find user by email
-    user = get_user_by_email(request.email)
+    user = await get_user_by_email(db, request.email)
     
     if not user:
         raise HTTPException(
@@ -718,14 +737,14 @@ async def login(request: UserLoginRequest):
         )
     
     # Generate access token
-    access_token = create_access_token(user.id, user.email)
+    access_token = create_access_token(str(user.id), user.email)
     
     # Return token and user info
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
         user=UserResponse(
-            id=user.id,
+            id=str(user.id),
             name=user.name,
             email=user.email,
             created_at=user.created_at
@@ -734,13 +753,13 @@ async def login(request: UserLoginRequest):
 
 
 @app.get("/api/v1/auth/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
+async def get_me(current_user: UserDB = Depends(get_current_user)):
     """
     Get the current authenticated user's information.
     Requires a valid JWT token in the Authorization header.
     """
     return UserResponse(
-        id=current_user.id,
+        id=str(current_user.id),
         name=current_user.name,
         email=current_user.email,
         created_at=current_user.created_at
