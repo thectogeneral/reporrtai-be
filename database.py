@@ -9,7 +9,7 @@ load_dotenv()
 # Format: postgresql+asyncpg://user:password@host:port/database
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:[MY-PASSWORD]@db.ubzgaivuytivjzgdbnke.supabase.co:5432/postgres"
+    "postgresql+asyncpg://user:password@host:port/database"
 )
 
 # Create async engine
