@@ -15,9 +15,12 @@ import praw
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 import jwt
 from passlib.context import CryptContext
@@ -52,6 +55,21 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # HTTP Bearer token security
 security = HTTPBearer()
+
+# ========== Rate Limiting Configuration ==========
+def get_user_id_from_request(request: Request) -> str:
+    """Extract user ID from JWT token for rate limiting"""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return payload.get("sub", get_remote_address(request))
+        except:
+            pass
+    return get_remote_address(request)
+
+limiter = Limiter(key_func=get_user_id_from_request)
 
 
 def hash_password(password: str) -> str:
@@ -573,6 +591,9 @@ def save_report(report: str, filename: str = "report.txt"):
 
 app = FastAPI(title="Reporrt AI API", description="API for generating reports from Reddit threads")
 
+# Add rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Global chains reused across requests
 performance_chain_global = None
@@ -767,11 +788,25 @@ async def get_me(current_user: UserDB = Depends(get_current_user)):
 
 
 @app.post("/api/v1/idea")
-async def generate_idea(url: str, request_id: Optional[str] = None):
+@limiter.limit("5/day")
+async def generate_idea_endpoint(
+    request: Request,
+    url: str,
+    request_id: Optional[str] = None,
+    current_user: UserDB = Depends(get_current_user)
+):
+    """Generate app idea from subreddit URL. Limited to 5 requests per day."""
     return await generate_idea(url, request_id)
 
 @app.post("/api/v1/performance")
-async def generate_performance_report(url: str, request_id: Optional[str] = None):
+@limiter.limit("5/day")
+async def generate_performance_report_endpoint(
+    request: Request,
+    url: str,
+    request_id: Optional[str] = None,
+    current_user: UserDB = Depends(get_current_user)
+):
+    """Generate performance report from subreddit URL. Limited to 5 requests per day."""
     return await generate_performance_report(url, request_id)
 
 @app.get("/api/v1/progress")
