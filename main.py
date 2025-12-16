@@ -111,11 +111,33 @@ def decode_access_token(token: str) -> Dict[str, Any]:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
 ) -> UserDB:
-    """Dependency to get the current authenticated user from JWT token"""
-    token = credentials.credentials
+    """
+    Dependency to get the current authenticated user from JWT token.
+    Supports both:
+    - Authorization header (Bearer token)
+    - HTTP-only cookie (access_token)
+    """
+    token = None
+    
+    # First, try to get token from Authorization header
+    if credentials:
+        token = credentials.credentials
+    
+    # If no header, try to get token from HTTP-only cookie
+    if not token:
+        token = request.cookies.get("access_token")
+    
+    # If still no token, raise unauthorized
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
+    
     payload = decode_access_token(token)
     user_id = payload.get("sub")
     
