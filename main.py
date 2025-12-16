@@ -15,7 +15,7 @@ import praw
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -621,9 +621,12 @@ def _set_progress(request_id: Optional[str], progress: int, status: str) -> None
 
 
 # Add CORS middleware to allow frontend to call the API
+# Note: When using credentials (cookies), specific origins must be listed (not "*")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,http://localhost:8080,http://127.0.0.1:5173,http://127.0.0.1:8080,http://10.73.132.188:8080").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -678,7 +681,7 @@ async def health():
 # ========== Authentication Endpoints ==========
 
 @app.post("/api/v1/auth/signup", response_model=TokenResponse)
-async def signup(request: UserSignupRequest, db: AsyncSession = Depends(get_db)):
+async def signup(request: UserSignupRequest, response: Response, db: AsyncSession = Depends(get_db)):
     """
     Register a new user account.
     
@@ -720,6 +723,17 @@ async def signup(request: UserSignupRequest, db: AsyncSession = Depends(get_db))
     # Generate access token
     access_token = create_access_token(str(new_user.id), request.email)
     
+    # Set HTTP-only cookie for secure token storage
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=JWT_EXPIRATION_HOURS * 3600,
+        path="/"
+    )
+    
     # Return token and user info
     return TokenResponse(
         access_token=access_token,
@@ -734,7 +748,7 @@ async def signup(request: UserSignupRequest, db: AsyncSession = Depends(get_db))
 
 
 @app.post("/api/v1/auth/login", response_model=TokenResponse)
-async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: UserLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
     """
     Authenticate a user and return an access token.
     
@@ -759,6 +773,17 @@ async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_db)):
     
     # Generate access token
     access_token = create_access_token(str(user.id), user.email)
+    
+    # Set HTTP-only cookie for secure token storage
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=JWT_EXPIRATION_HOURS * 3600,
+        path="/"
+    )
     
     # Return token and user info
     return TokenResponse(
