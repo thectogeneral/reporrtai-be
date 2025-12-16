@@ -798,6 +798,23 @@ async def login(request: UserLoginRequest, response: Response, db: AsyncSession 
     )
 
 
+@app.post("/api/v1/auth/logout")
+async def logout(response: Response):
+    """
+    Log out the current user by clearing the authentication cookie.
+    """
+    # Clear the HTTP-only cookie by setting it to expire immediately
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax"
+    )
+    
+    return {"message": "Successfully logged out"}
+
+
 @app.get("/api/v1/auth/me", response_model=UserResponse)
 async def get_me(current_user: UserDB = Depends(get_current_user)):
     """
