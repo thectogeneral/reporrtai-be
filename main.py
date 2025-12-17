@@ -23,7 +23,11 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 import jwt
+import httpx
+from starlette.responses import RedirectResponse
 from passlib.context import CryptContext
+from starlette.responses import RedirectResponse
+import httpx
 from models.PainPointModel import PainPointOutput
 from models.AppIdeaModel import AppIdeaOutput
 from models.PerformanceReportModel import PerformanceReportOutput
@@ -50,8 +54,20 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-key-change-in-pr
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 
+# ========== Google OAuth Configuration ==========
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/v1/auth/google/callback")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
+
 # Password hashing configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ========== Google OAuth Configuration ==========
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/v1/auth/google/callback")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
 
 # HTTP Bearer token security
 security = HTTPBearer()
@@ -835,6 +851,121 @@ async def logout(response: Response):
     )
     
     return {"message": "Successfully logged out"}
+
+
+# ========== Google OAuth Endpoints ==========
+
+@app.get("/api/v1/auth/google")
+async def google_login():
+    """
+    Get the Google OAuth authorization URL.
+    Frontend should redirect the user to this URL.
+    """
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google OAuth is not configured. Please set GOOGLE_CLIENT_ID environment variable."
+        )
+    
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={GOOGLE_CLIENT_ID}&"
+        f"redirect_uri={GOOGLE_REDIRECT_URI}&"
+        "response_type=code&"
+        "scope=openid%20email%20profile&"
+        "access_type=offline&"
+        "prompt=consent"
+    )
+    return {"auth_url": google_auth_url}
+
+
+@app.get("/api/v1/auth/google/callback")
+async def google_callback(code: str, response: Response, db: AsyncSession = Depends(get_db)):
+    """
+    Handle Google OAuth callback.
+    Exchanges the authorization code for tokens and creates/logs in the user.
+    """
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google OAuth is not configured"
+        )
+    
+    try:
+        # Exchange authorization code for tokens
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": GOOGLE_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+            )
+            token_data = token_response.json()
+            
+            if "error" in token_data:
+                print(f"Google token error: {token_data}")
+                return RedirectResponse(url=f"{FRONTEND_URL}/login?error=google_token_error")
+            
+            # Get user info from Google
+            userinfo_response = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {token_data['access_token']}"},
+            )
+            user_info = userinfo_response.json()
+        
+        email = user_info.get("email")
+        name = user_info.get("name", email.split("@")[0] if email else "User")
+        google_id = user_info.get("id")
+        
+        if not email:
+            return RedirectResponse(url=f"{FRONTEND_URL}/login?error=no_email")
+        
+        # Check if user exists by email or google_id
+        existing_user = await get_user_by_email(db, email)
+        
+        if existing_user:
+            # Update google_id if not set
+            if not existing_user.google_id:
+                existing_user.google_id = google_id
+                await db.commit()
+            user = existing_user
+        else:
+            # Create new user (no password for OAuth users)
+            user = UserDB(
+                name=name,
+                email=email,
+                password_hash="",  # OAuth users don't have passwords
+                google_id=google_id,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+        
+        # Generate access token
+        access_token = create_access_token(str(user.id), email)
+        
+        # Create redirect response with cookie
+        redirect_response = RedirectResponse(url=f"{FRONTEND_URL}/?auth=success")
+        redirect_response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=False,  # Set to True in production with HTTPS
+            samesite="lax",
+            max_age=JWT_EXPIRATION_HOURS * 3600,
+            path="/"
+        )
+        
+        return redirect_response
+        
+    except Exception as e:
+        print(f"Google OAuth error: {e}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=google_auth_failed")
 
 
 @app.get("/api/v1/auth/me", response_model=UserResponse)
